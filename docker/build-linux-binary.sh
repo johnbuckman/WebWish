@@ -64,6 +64,12 @@ echo "### patch the linux64 build script"
 BS=$AW/undroid/build-undroidwish-linux64.sh
 cp "$BS" "$BS.orig"
 perl -0pi -e 's/(--enable-video-jsmpeg)/--disable-video-jsmpeg/g' "$BS"   # no ffmpeg
+# The upstream script is x86_64-only: it hardcodes `gcc -m64` and
+# `--build=x86_64-linux-gnu`. Strip those so autoconf detects the host — the
+# recipe then builds natively on whatever arch runs it (aarch64 here; x86_64 on
+# an x86 host/CI). For a forced x86_64 build, run this container with
+# `docker run --platform linux/amd64` instead (emulated on Apple Silicon).
+perl -0pi -e 's/ -m64//g; s/ -m32//g; s/--build=x86_64-linux-gnu//g' "$BS"
 # Trim SUBDIRS to the core needed for a working undroidwish + wstiles: Tcl,
 # zlib, AndroWish's libwebsockets (for wstiles), freetype (fonts), SDL2 (with
 # wstiles), Tk-SDL. Skips ~80 optional extensions and their exotic deps. If the
