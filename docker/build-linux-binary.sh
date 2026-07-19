@@ -32,6 +32,12 @@ rm -rf /work; mkdir -p /work
 rsync -a /aw/ /work/aw/
 AW=/work/aw
 
+# Drop Tcl's optional bundled packages we don't need for a Tk wish + wstiles
+# (itcl, sqlite, tdbc*). They fail/bloat the build and nothing here requires them.
+echo "### strip unneeded Tcl bundled packages"
+rm -rf "$AW"/jni/tcl/pkgs/itcl* "$AW"/jni/tcl/pkgs/sqlite* "$AW"/jni/tcl/pkgs/tdbc* 2>/dev/null
+ls "$AW"/jni/tcl/pkgs/ 2>/dev/null
+
 echo "### inject wstiles driver into the SDL2 fork (jni/SDL2)"
 SDL=$AW/jni/SDL2
 mkdir -p "$SDL/src/video/wstiles/data"
@@ -76,7 +82,12 @@ perl -0pi -e 's/ -m64//g; s/ -m32//g; s/--build=x86_64-linux-gnu//g' "$BS"
 # single-file/zipfs assembly needs more, add it back here.
 perl -0pi -e 's/^SUBDIRS="tcl .*?\n(SUBDIRS=.*\n)+/SUBDIRS="tcl zlib libwebsockets freetype SDL2 sdl2tk jpeg-turbo tkimg"\n/m' "$BS"
 echo "SUBDIRS now: $(grep -m1 '^SUBDIRS=' "$BS")"
-export LIBS="${LIBS:-} -lwebsockets"
+# wstiles' libwebsockets symbols (in libSDL2.a) must resolve at the final
+# sdl2wish link. Inject -lwebsockets into the Tk-SDL configure ONLY (identified
+# by its unique AGG_CUSTOM_ALLOCATOR CFLAGS) so Tk records it in its link — NOT
+# globally, which would poison every other package's build.
+perl -0pi -e 's/(CFLAGS="-DAGG_CUSTOM_ALLOCATOR=1" \.\/configure)/LIBS="-lwebsockets" $1/' "$BS"
+grep -q 'LIBS="-lwebsockets" CFLAGS="-DAGG_CUSTOM_ALLOCATOR' "$BS" && echo "lws injected into Tk link" || echo "WARN: lws injection missed"
 
 echo "### run the AndroWish linux64 build (this is the long part)"
 mkdir -p /work/build && cd /work/build
