@@ -17,6 +17,11 @@
 set -uo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+# Optional whole-screen AV1 codec (libaom). Set WEBWISH_AV1=1 to enable; default
+# is the simpler tiles-only build.
+AV1="${WEBWISH_AV1:-0}"
+if [ "$AV1" = 1 ]; then AVDEF="-DWSTILES_HAVE_AV1"; AVLIB="-laom"; echo "### AV1 codec ENABLED"; else AVDEF=""; AVLIB=""; echo "### tiles-only (no AV1)"; fi
+
 echo "### toolchain + AndroWish build deps"
 apt-get update -qq
 apt-get install -y -qq build-essential autoconf automake libtool pkg-config \
@@ -25,6 +30,7 @@ apt-get install -y -qq build-essential autoconf automake libtool pkg-config \
   libfreetype6-dev libfontconfig1-dev libpng-dev libjpeg-dev \
   libx11-dev libxext-dev libxft-dev libudev-dev libasound2-dev \
   >/dev/null || { echo "apt failed"; exit 1; }
+[ "$AV1" = 1 ] && { apt-get install -y -qq libaom-dev >/dev/null || { echo "libaom-dev apt failed"; exit 1; }; }
 # AndroWish bundles its own tcl/tk/libwebsockets, so no tcl-dev needed.
 
 echo "### stage a writable copy of the AndroWish tree"
@@ -68,7 +74,9 @@ $(objects)/SDL_wstiles.lo: $(srcdir)/src/video/wstiles/SDL_wstiles.c
 	$(RUN_CMD_CC)$(LIBTOOL) --tag=CC --mode=compile $(CC) $(CFLAGS) $(EXTRA_CFLAGS) -MMD -MT $@ -c $< -o $@
 MK
 }
-echo "wstiles wired into SDL2 fork"
+# add the AV1 compile define when enabled (libaom headers come from libaom-dev)
+[ "$AV1" = 1 ] && perl -pi -e 's/(-MMD -MT \$\@)/-DWSTILES_HAVE_AV1 $1/' "$SDL/Makefile.in"
+echo "wstiles wired into SDL2 fork ${AVDEF:+(+AV1)}"
 
 echo "### patch the linux64 build script"
 BS=$AW/undroid/build-undroidwish-linux64.sh
@@ -98,8 +106,8 @@ KEEP_CD="tcl/unix zlib freetype SDL2 sdl2tk/sdl"
 # AFTER -lSDL2 on the link line (static link order). WISH_LIBS is the tail of
 # that line (its @EXTRA_WISH_LIBS@ carries -lSDL2), so append the two libs to
 # the END of WISH_LIBS in the Tk-SDL Makefile.in (survives configure).
-perl -0pi -e 's/^(WISH_LIBS = .*)$/$1 -lwebsockets -lz/m' "$AW/jni/sdl2tk/sdl/Makefile.in"
-grep -q 'WISH_LIBS = .*-lwebsockets -lz' "$AW/jni/sdl2tk/sdl/Makefile.in" && echo "lws+z appended to WISH_LIBS" || echo "WARN: WISH_LIBS edit missed"
+perl -0pi -e "s/^(WISH_LIBS = .*)\$/\$1 -lwebsockets -lz $AVLIB/m" "$AW/jni/sdl2tk/sdl/Makefile.in"
+grep -q 'WISH_LIBS = .*-lwebsockets -lz' "$AW/jni/sdl2tk/sdl/Makefile.in" && echo "lws+z${AVLIB:+ +aom} appended to WISH_LIBS" || echo "WARN: WISH_LIBS edit missed"
 
 echo "### run the AndroWish linux64 build (this is the long part)"
 mkdir -p /work/build && cd /work/build
