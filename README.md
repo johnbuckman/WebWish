@@ -1,6 +1,6 @@
 # WebWish
 
-**Serve any SDL2 / Tk desktop app as a web app — with zero changes to the app.**
+**Serve any Androwish or Tcl / Tk desktop app as a web app — with zero changes to the app.**
 
 ![WebWish — undroidwish Tk apps (starDOM XML editor + a TkTable spreadsheet) rendered and driven live in a browser tab](webwish-demo.png)
 
