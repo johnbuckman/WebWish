@@ -23,9 +23,21 @@ that renders through SDL's software framebuffer path.
 
 > **Status: working alpha.** Display, mouse, keyboard (including control keys),
 > multi-command round-trips, per-session process spawn/reap, and single-port
-> multiplexing are all verified live. It has so far only been **built and tested
-> on arm64 macOS**, and it is a **patch into an SDL2 build tree**, not yet a
-> drop-in library. See [Limitations](#limitations).
+> multiplexing are all verified live on arm64 macOS. The driver is also
+> **verified to build and initialize on Linux** (against AndroWish's SDL2 fork,
+> in a Debian container) — see [docker/](docker/). It is a **patch into an SDL2
+> build tree**, not yet a drop-in library. See [Limitations](#limitations).
+
+> ## ⚠️ Security
+>
+> Exposing a GUI app — especially undroidwish's default **Tcl console** — to
+> untrusted users is **remote code execution as a service**. Do **not** put
+> WebWish in front of anyone you don't trust without reading
+> **[SECURITY.md](SECURITY.md)** first. The short version: (1) never expose a
+> console — ship a locked-down app in a **safe interpreter**; (2) run each
+> session in a **hardened, ephemeral container** (`docker/`); (3) authenticate
+> and rate-limit the bridge; (4) never run it on a host that holds anything you
+> care about.
 
 ---
 
@@ -95,6 +107,16 @@ binary path at the top of `stream.adp`/`spawn.adp`, and open
 
 ---
 
+### Mode C — one hardened container per session (recommended for untrusted use)
+
+The `docker/` directory runs each session as a locked-down, ephemeral container
+(`--network none`, read-only rootfs, non-root, `--cap-drop ALL`, pid/mem/cpu
+caps), wired over stdio so no per-session port is opened. `server/stream-docker.adp`
+is the bridge variant that spawns a container instead of a bare process. See
+[docker/README.md](docker/README.md) and [SECURITY.md](SECURITY.md).
+
+---
+
 ## Repository layout
 
 ```
@@ -102,8 +124,11 @@ driver/    SDL_wstiles.c — the SDL2 video driver (the reusable core)
            data/{index.html,wstiles.js} — client assets embedded into the binary
            genfiles.sh — regenerates SDL_wstiles_files.h from data/
 server/    NaviServer reference bridge (.adp) + a copy of the browser client
+           stream-docker.adp — bridge variant: one hardened container per session
+docker/    Linux build recipe + hardened per-session container runtime
 patches/   the edits needed to wire the driver into an SDL2 tree
 docs/      BUILDING.md, WIRE-PROTOCOL.md
+SECURITY.md  threat model + defense-in-depth — READ BEFORE EXPOSING
 ```
 
 > `server/wstiles.js` and `driver/data/wstiles.js` are the **same** browser
