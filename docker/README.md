@@ -26,12 +26,17 @@ browser ──WSS──► reverse proxy (TLS, auth) ──► naviserver (serve
 
 - ✅ **The wstiles driver builds and initializes on Linux** — verified in a
   Debian container against AndroWish's SDL2 fork (2.0.6); `SDL_GetCurrentVideoDriver()`
-  returns `wstiles` and the WS server comes up. This was the key portability
-  unknown and it's settled.
-- 🚧 **The full `undroidwish-wstiles` Linux binary** (`build-linux-binary.sh`)
-  is the remaining heavy build (SDL2 + Tcl + Tk-SDL + extensions). It is a
-  recipe expected to need iteration on `-dev` dependencies; v1 is **tiles-only**
-  (no AV1) to keep the link simple.
+  returns `wstiles` and the WS server comes up.
+- ✅ **The full `undroidwish-wstiles` Linux binary builds** — `build-linux-binary.sh`
+  produces a 21.6 MB single-file aarch64 ELF (Tcl + zlib + freetype + SDL2/wstiles
+  + Tk-SDL, batteries-trimmed, **tiles-only**). Verified: it runs and initializes
+  the wstiles software renderer. Built entirely in Docker on macOS.
+- ✅ **The hardened per-session container works end to end** — the runtime image
+  runs undroidwish over stdio under `--network none --read-only --user 65534
+  --cap-drop ALL --pids-limit --memory`, emitting the correct `wtil` handshake
+  (1024×768, tiles). All isolation flags verified applied via `docker inspect`.
+- 🚧 Remaining: wire `server/stream-docker.adp` to `run-session.sh` for a live
+  browser test; add AV1 back (`-DWSTILES_HAVE_AV1` + `libaom`); build for x86_64.
 
 ## Build
 
