@@ -32,11 +32,15 @@ rm -rf /work; mkdir -p /work
 rsync -a /aw/ /work/aw/
 AW=/work/aw
 
-# Drop Tcl's optional bundled packages we don't need for a Tk wish + wstiles
-# (itcl, sqlite, tdbc*). They fail/bloat the build and nothing here requires them.
+# Drop ALL of Tcl's optional bundled C packages (itcl, sqlite, tdbc*, thread).
+# A Tk wish + wstiles needs none of them, and every one hits the same
+# missing-.o TEA-build quirk on this platform. Removing the subdirs makes
+# Tcl's `make packages` a no-op.
 echo "### strip unneeded Tcl bundled packages"
-rm -rf "$AW"/jni/tcl/pkgs/itcl* "$AW"/jni/tcl/pkgs/sqlite* "$AW"/jni/tcl/pkgs/tdbc* 2>/dev/null
-ls "$AW"/jni/tcl/pkgs/ 2>/dev/null
+for p in itcl sqlite3 tdbc1 tdbcmysql tdbcodbc tdbcpostgres tdbcsqlite3 thread; do
+  rm -rf "$AW"/jni/tcl/pkgs/${p}* 2>/dev/null
+done
+echo "remaining pkgs: $(ls "$AW"/jni/tcl/pkgs/ 2>/dev/null | tr '\n' ' ')"
 
 echo "### inject wstiles driver into the SDL2 fork (jni/SDL2)"
 SDL=$AW/jni/SDL2
@@ -80,8 +84,15 @@ perl -0pi -e 's/ -m64//g; s/ -m32//g; s/--build=x86_64-linux-gnu//g' "$BS"
 # zlib, AndroWish's libwebsockets (for wstiles), freetype (fonts), SDL2 (with
 # wstiles), Tk-SDL. Skips ~80 optional extensions and their exotic deps. If the
 # single-file/zipfs assembly needs more, add it back here.
-perl -0pi -e 's/^SUBDIRS="tcl .*?\n(SUBDIRS=.*\n)+/SUBDIRS="tcl zlib libwebsockets freetype SDL2 sdl2tk jpeg-turbo tkimg"\n/m' "$BS"
+perl -0pi -e 's/^SUBDIRS="tcl .*?\n(SUBDIRS=.*\n)+/SUBDIRS="tcl zlib freetype SDL2 sdl2tk"\n/m' "$BS"
 echo "SUBDIRS now: $(grep -m1 '^SUBDIRS=' "$BS")"
+# The build BODY has a hardcoded per-component block for every AndroWish
+# component (libressl, curl, blt, tkimg, dozens of extensions), independent of
+# SUBDIRS. Each block early-exits on `test -e build-stamp`. We want only the
+# core (Tcl, zlib, freetype, SDL2+wstiles, Tk-SDL) plus the final single-file
+# wrap; libwebsockets/zlib headers+libs come from the system packages. So after
+# init we plant a build-stamp in every OTHER component's build dir to skip it.
+KEEP_CD="tcl/unix zlib freetype SDL2 sdl2tk/sdl"
 # wstiles' libwebsockets symbols (in libSDL2.a) must resolve at the final
 # sdl2wish link. Inject -lwebsockets into the Tk-SDL configure ONLY (identified
 # by its unique AGG_CUSTOM_ALLOCATOR CFLAGS) so Tk records it in its link — NOT
@@ -96,6 +107,30 @@ mkdir -p /work/build && cd /work/build
 # extensions) from jni/ into here; then 'build' compiles the lot.
 echo "--- init (populate build dir from AndroWish source) ---"
 if ! "$BS" init; then echo "init FAILED"; exit 1; fi
+
+echo "--- plant build-stamps to skip non-core components ---"
+# Extract every build block's cd target from the script, and for each one not
+# in KEEP_CD, create a stub dir + build-stamp so its block early-exits.
+CDTARGETS=$(awk '
+  /^echo -n "build /{ need=1; next }
+  need && /[ \t]cd /{ line=$0; sub(/^[ \t]*cd /,"",line); split(line,a," "); print a[1]; need=0 }
+' "$BS")
+skipped=0
+for t in $CDTARGETS; do
+  keep=0; for k in $KEEP_CD; do [ "$t" = "$k" ] && keep=1; done
+  [ "$keep" = 1 ] && continue
+  mkdir -p "$t" && : > "$t/build-stamp" && skipped=$((skipped+1))
+done
+echo "planted build-stamp in $skipped non-core components; building only: $KEEP_CD"
+
+# The AndroWish tree ships ~1600 committed object/archive files from macOS
+# builds (e.g. sdl2tk/sdl/tkAppInit.o is Mach-O arm64). `make` sees them as
+# up-to-date and links the Mach-O objects on Linux -> "file format not
+# recognized". Purge all compiled artifacts so everything recompiles for Linux.
+echo "--- purge stale (macOS) object/archive artifacts from the source ---"
+n=$(find /work/build -type f \( -name '*.o' -o -name '*.a' -o -name '*.lo' -o -name '*.la' -o -name '*.dylib' \) -print -delete | wc -l)
+echo "purged $n stale artifacts"
+
 echo "--- build ---"
 if "$BS" build; then
   echo "linux64 build OK"
