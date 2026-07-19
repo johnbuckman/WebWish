@@ -33,10 +33,17 @@ browser ──WSS──► reverse proxy (TLS, auth) ──► naviserver (serve
   the wstiles software renderer. Built entirely in Docker on macOS.
 - ✅ **The hardened per-session container works end to end** — the runtime image
   runs undroidwish over stdio under `--network none --read-only --user 65534
-  --cap-drop ALL --pids-limit --memory`, emitting the correct `wtil` handshake
-  (1024×768, tiles). All isolation flags verified applied via `docker inspect`.
-- 🚧 Remaining: wire `server/stream-docker.adp` to `run-session.sh` for a live
-  browser test; add AV1 back (`-DWSTILES_HAVE_AV1` + `libaom`); build for x86_64.
+  --cap-drop ALL --pids-limit --memory`, emitting the correct `wtil` handshake.
+  All isolation flags verified applied via `docker inspect`.
+- ✅ **Live browser session verified** — `server/democ.adp` → `stream-docker.adp`
+  → `run-session.sh` spawns one hardened container per tab; undroidwish renders
+  in the browser, input round-trips *inside* the container (`pwd` → `/`), and the
+  container is reaped on disconnect.
+- ✅ **AV1 verified** — `WEBWISH_AV1=1` builds an AV1 binary (libaom); with
+  `--build-arg WEBWISH_AV1=1` + `WEBWISH_CODEC=av1` the browser shows
+  "live (AV1)" via WebCodecs.
+- ✅ **x86_64 verified** — `docker run --platform linux/amd64` yields a genuine
+  x86-64 ELF that runs and emits the handshake (emulated on Apple Silicon).
 
 ## Build
 
@@ -50,6 +57,22 @@ docker run --rm \
 
 # 2. bake the runtime image
 docker build -t webwish/undroidwish:latest .
+```
+
+**Variants** (same script):
+
+```sh
+# AV1 codec (adds libaom): build the binary, then an AV1 runtime image
+docker run --rm -e WEBWISH_AV1=1 -v ~/iwish/src/androwish:/aw:ro \
+  -v "$PWD/..":/webwish:ro -v "$PWD/dist":/out debian:bookworm \
+  bash /webwish/docker/build-linux-binary.sh
+docker build --build-arg WEBWISH_AV1=1 -t webwish/undroidwish:av1 .
+# then run sessions with:  WEBWISH_CODEC=av1 WEBWISH_IMAGE=webwish/undroidwish:av1 ./run-session.sh
+
+# x86_64 (emulated on Apple Silicon; native on an x86 host)
+docker run --rm --platform linux/amd64 -v ~/iwish/src/androwish:/aw:ro \
+  -v "$PWD/..":/webwish:ro -v "$PWD/dist":/out debian:bookworm \
+  bash /webwish/docker/build-linux-binary.sh
 ```
 
 ## Run a session by hand
