@@ -2,11 +2,12 @@
 
 **Serve any SDL2 / Tk desktop app as a web app — with zero changes to the app.**
 
-![WebWish — undroidwish's Tcl/Tk console rendered and driven live in a browser](webwish-demo.png)
+![WebWish — undroidwish Tk apps (starDOM XML editor + a TkTable spreadsheet) rendered and driven live in a browser tab](webwish-demo.png)
 
-*The undroidwish framebuffer above is a real capture straight from the browser
-`<canvas>` — a live `pwd` typed into the web page and executed by the headless
-Tcl/Tk process on the server.*
+*A live WebWish session in a browser tab: the headless undroidwish process on
+the server is running real Tk widgets — the starDOM XML editor and a colored
+TkTable spreadsheet — streamed to the page as AV1 and driven with the mouse and
+keyboard, with no changes to the app.*
 
 WebWish is an [SDL2](https://libsdl.org) video driver (internally named
 `wstiles`) that runs a graphical app **headless on a server** and renders +
