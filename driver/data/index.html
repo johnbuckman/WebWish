@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>undroidwish (wstiles)</title>
+<style>
+  html, body { margin: 0; background: #1a1a1a; color: #ddd;
+    font-family: -apple-system, Helvetica, Arial, sans-serif; }
+  #wrap { display: flex; flex-direction: column; align-items: center; padding: 12px; }
+  #status { font-size: 13px; color: #9ab; margin-bottom: 8px; }
+  #screen { background: #004e78; box-shadow: 0 4px 24px rgba(0,0,0,.5);
+    image-rendering: pixelated; max-width: 100%; outline: none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="status">loading…</div>
+  <canvas id="screen" width="1024" height="768"></canvas>
+</div>
+<script src="wstiles.js"></script>
+</body>
+</html>
