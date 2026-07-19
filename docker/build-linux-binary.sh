@@ -20,10 +20,12 @@ export DEBIAN_FRONTEND=noninteractive
 echo "### toolchain + AndroWish build deps"
 apt-get update -qq
 apt-get install -y -qq build-essential autoconf automake libtool pkg-config \
-  perl rsync zip file \
-  libwebsockets-dev zlib1g-dev \
+  perl rsync zip unzip file ca-certificates \
+  libwebsockets-dev zlib1g-dev libssl-dev \
   libfreetype6-dev libfontconfig1-dev libpng-dev libjpeg-dev \
-  libx11-dev libxext-dev libxft-dev tcl-dev >/dev/null || { echo "apt failed"; exit 1; }
+  libx11-dev libxext-dev libxft-dev libudev-dev libasound2-dev \
+  >/dev/null || { echo "apt failed"; exit 1; }
+# AndroWish bundles its own tcl/tk/libwebsockets, so no tcl-dev needed.
 
 echo "### stage a writable copy of the AndroWish tree"
 rm -rf /work; mkdir -p /work
@@ -58,22 +60,30 @@ MK
 }
 echo "wstiles wired into SDL2 fork"
 
-echo "### patch the linux64 build script to link wstiles' deps (-lwebsockets)"
+echo "### patch the linux64 build script"
 BS=$AW/undroid/build-undroidwish-linux64.sh
 cp "$BS" "$BS.orig"
-# The sdl2wish link must pull in libwebsockets (wstiles' only extra dep in the
-# tiles-only build; zlib is already linked). Add it to the Tk/SDL build's LIBS.
 perl -0pi -e 's/(--enable-video-jsmpeg)/--disable-video-jsmpeg/g' "$BS"   # no ffmpeg
-# Append -lwebsockets wherever sdl2wish/sdl2tk is linked via LIBS=…; belt-and-braces:
+# Trim SUBDIRS to the core needed for a working undroidwish + wstiles: Tcl,
+# zlib, AndroWish's libwebsockets (for wstiles), freetype (fonts), SDL2 (with
+# wstiles), Tk-SDL. Skips ~80 optional extensions and their exotic deps. If the
+# single-file/zipfs assembly needs more, add it back here.
+perl -0pi -e 's/^SUBDIRS="tcl .*?\n(SUBDIRS=.*\n)+/SUBDIRS="tcl zlib libwebsockets freetype SDL2 sdl2tk jpeg-turbo tkimg"\n/m' "$BS"
+echo "SUBDIRS now: $(grep -m1 '^SUBDIRS=' "$BS")"
 export LIBS="${LIBS:-} -lwebsockets"
 
 echo "### run the AndroWish linux64 build (this is the long part)"
 mkdir -p /work/build && cd /work/build
 # The script refuses to run inside the AndroWish tree, so we run from /work/build.
+# 'init' rsyncs every subdir (tcl, SDL2, sdl2tk, AndroWish's own libwebsockets,
+# extensions) from jni/ into here; then 'build' compiles the lot.
+echo "--- init (populate build dir from AndroWish source) ---"
+if ! "$BS" init; then echo "init FAILED"; exit 1; fi
+echo "--- build ---"
 if "$BS" build; then
   echo "linux64 build OK"
 else
-  echo "linux64 build FAILED — see build.log below"; tail -40 /work/build/build.log 2>/dev/null
+  echo "linux64 build FAILED — see build.log below"; tail -60 /work/build/build.log 2>/dev/null
   exit 1
 fi
 
