@@ -4,3 +4,6 @@
 *.a
 *.dylib
 *.so
+
+# Linux build artifact (reproduce with docker/build-linux-binary.sh)
+docker/dist/

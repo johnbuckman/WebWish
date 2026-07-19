@@ -93,12 +93,13 @@ echo "SUBDIRS now: $(grep -m1 '^SUBDIRS=' "$BS")"
 # wrap; libwebsockets/zlib headers+libs come from the system packages. So after
 # init we plant a build-stamp in every OTHER component's build dir to skip it.
 KEEP_CD="tcl/unix zlib freetype SDL2 sdl2tk/sdl"
-# wstiles' libwebsockets symbols (in libSDL2.a) must resolve at the final
-# sdl2wish link. Inject -lwebsockets into the Tk-SDL configure ONLY (identified
-# by its unique AGG_CUSTOM_ALLOCATOR CFLAGS) so Tk records it in its link — NOT
-# globally, which would poison every other package's build.
-perl -0pi -e 's/(CFLAGS="-DAGG_CUSTOM_ALLOCATOR=1" \.\/configure)/LIBS="-lwebsockets" $1/' "$BS"
-grep -q 'LIBS="-lwebsockets" CFLAGS="-DAGG_CUSTOM_ALLOCATOR' "$BS" && echo "lws injected into Tk link" || echo "WARN: lws injection missed"
+# wstiles' libwebsockets (lws_*) and zlib (compress2/compressBound) symbols
+# live in libSDL2.a and must resolve at the final sdl2wish link. They must come
+# AFTER -lSDL2 on the link line (static link order). WISH_LIBS is the tail of
+# that line (its @EXTRA_WISH_LIBS@ carries -lSDL2), so append the two libs to
+# the END of WISH_LIBS in the Tk-SDL Makefile.in (survives configure).
+perl -0pi -e 's/^(WISH_LIBS = .*)$/$1 -lwebsockets -lz/m' "$AW/jni/sdl2tk/sdl/Makefile.in"
+grep -q 'WISH_LIBS = .*-lwebsockets -lz' "$AW/jni/sdl2tk/sdl/Makefile.in" && echo "lws+z appended to WISH_LIBS" || echo "WARN: WISH_LIBS edit missed"
 
 echo "### run the AndroWish linux64 build (this is the long part)"
 mkdir -p /work/build && cd /work/build
@@ -130,6 +131,16 @@ echo "planted build-stamp in $skipped non-core components; building only: $KEEP_
 echo "--- purge stale (macOS) object/archive artifacts from the source ---"
 n=$(find /work/build -type f \( -name '*.o' -o -name '*.a' -o -name '*.lo' -o -name '*.la' -o -name '*.dylib' \) -print -delete | wc -l)
 echo "purged $n stale artifacts"
+
+# The tree's committed autoconf state bakes in a macOS freetype dev path
+# (/Users/john/iwish/dist/ft-dev) that the Tk-SDL AGG font renderer compiles
+# against. Point it at the container's system freetype (libfreetype6-dev) so
+# ft2build.h and libfreetype resolve.
+echo "--- alias the baked-in macOS freetype path to system freetype ---"
+mkdir -p /Users/john/iwish/dist/ft-dev
+ln -sfn /usr/include "/Users/john/iwish/dist/ft-dev/include"
+ln -sfn "/usr/lib/$(gcc -dumpmachine)" "/Users/john/iwish/dist/ft-dev/lib"
+ls -l /Users/john/iwish/dist/ft-dev/include/freetype2/ft2build.h 2>&1 | head -1
 
 echo "--- build ---"
 if "$BS" build; then
