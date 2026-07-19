@@ -14,6 +14,7 @@
 #   WEBWISH_RUNTIME   OCI runtime            (e.g. runsc for gVisor; default runc)
 #   WEBWISH_MEMORY    memory cap             (default 256m)
 #   WEBWISH_PIDS      pid cap                (default 128)
+#   WEBWISH_CODEC     wstiles codec          (av1 for an AV1-capable image; default tiles)
 
 set -eu
 
@@ -32,6 +33,7 @@ exec docker run --rm -i \
   --memory "$MEM" --memory-swap "$MEM" \
   --cpus 1 \
   --ulimit nofile=256:256 \
+  ${WEBWISH_CODEC:+-e SDL_VIDEO_WSTILES_CODEC=$WEBWISH_CODEC} \
   ${WEBWISH_RUNTIME:+--runtime "$WEBWISH_RUNTIME"} \
   "$IMAGE"
 

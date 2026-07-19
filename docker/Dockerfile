@@ -10,17 +10,21 @@ FROM debian:bookworm-slim
 
 # Runtime shared libraries the wstiles driver + undroidwish need. Adjust the
 # package versions to your base image; on bookworm these are current.
-# Runtime libs for the (tiles-only) wstiles build. Add libaom3 if you rebuild
-# with -DWSTILES_HAVE_AV1 for the AV1 codec.
+# Runtime libs. For an AV1-capable binary (built with WEBWISH_AV1=1) pass
+# --build-arg WEBWISH_AV1=1 so libaom3 is present at runtime.
+ARG WEBWISH_AV1=0
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libwebsockets17 zlib1g \
         libfreetype6 libfontconfig1 libpng16-16 libx11-6 \
+        $([ "$WEBWISH_AV1" = 1 ] && echo libaom3) \
     && rm -rf /var/lib/apt/lists/*
 
 COPY dist/undroidwish-wstiles /usr/local/bin/undroidwish-wstiles
 RUN chmod 0755 /usr/local/bin/undroidwish-wstiles
 
 # stdio transport: the container's stdin/stdout ARE the wire. No port opened.
+# Codec (tiles default, or av1) is chosen at runtime by the bridge — see
+# run-session.sh's WEBWISH_CODEC — not baked in, so one image serves both.
 ENV SDL_VIDEODRIVER=wstiles \
     SDL_VIDEO_WSTILES_STDIO=1
 
