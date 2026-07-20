@@ -73,8 +73,31 @@ The full byte layout is in [docs/WIRE-PROTOCOL.md](docs/WIRE-PROTOCOL.md).
 
 ## Quick start
 
-You first need to build SDL2 with this driver and link your SDL2 app against
-it — see [docs/BUILDING.md](docs/BUILDING.md). Once you have a binary
+### Fastest — prebuilt Docker image (no build required)
+
+Ready-to-run images of undroidwish under the `wstiles` driver are attached to
+the [latest release](https://github.com/johnbuckman/WebWish/releases/tag/v0.1.0-images)
+— x86-64 and arm64, lossless-tiles and AV1:
+
+```sh
+# grab the asset for your arch, then:
+gunzip -c webwish-undroidwish-amd64-tiles.tar.gz | docker load
+
+# one hardened session; stdio IS the wire, so no port is opened
+docker run --rm -i --network none --read-only --tmpfs /tmp \
+  --user 65534:65534 --cap-drop ALL --security-opt no-new-privileges \
+  --pids-limit 128 --memory 256m --cpus 1 \
+  webwish/undroidwish:latest-amd64
+```
+
+Put a WebSocket bridge in front to see it in a browser — the repo ships one
+(`server/stream-docker.adp` + `server/democ.adp`, driven by
+[`docker/run-session.sh`](docker/run-session.sh)). See [docker/README.md](docker/README.md).
+
+### From source
+
+To build the driver into your own SDL2 app, you need to compile SDL2 with it and
+link against it — see [docs/BUILDING.md](docs/BUILDING.md). Once you have a binary
 (`undroidwish-wstiles` in the examples below):
 
 ### Mode A — the driver's own web server (simplest)

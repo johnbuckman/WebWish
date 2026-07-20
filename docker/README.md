@@ -45,6 +45,27 @@ browser ──WSS──► reverse proxy (TLS, auth) ──► naviserver (serve
 - ✅ **x86_64 verified** — `docker run --platform linux/amd64` yields a genuine
   x86-64 ELF that runs and emits the handshake (emulated on Apple Silicon).
 
+## Prebuilt images (skip the build)
+
+Ready-to-run images are attached to the
+[v0.1.0-images release](https://github.com/johnbuckman/WebWish/releases/tag/v0.1.0-images):
+
+| Asset | Arch | Codec | Tag inside |
+|---|---|---|---|
+| `webwish-undroidwish-amd64-tiles.tar.gz` | x86-64 | tiles | `webwish/undroidwish:latest-amd64` |
+| `webwish-undroidwish-arm64-tiles.tar.gz` | arm64 | tiles | `webwish/undroidwish:latest` |
+| `webwish-undroidwish-arm64-av1.tar.gz` | arm64 | AV1 | `webwish/undroidwish:av1` |
+
+```sh
+gunzip -c webwish-undroidwish-amd64-tiles.tar.gz | docker load
+WEBWISH_IMAGE=webwish/undroidwish:latest-amd64 ./run-session.sh </dev/null | head -c 13 | od -An -tx1
+# -> 00 00 00 09 77 74 69 6c 04 00 03 00 00   ("wtil" handshake, 1024x768, tiles)
+```
+
+Verify downloads against `SHA256SUMS.txt`. These images ship undroidwish's
+**default Tcl console** — read [../SECURITY.md](../SECURITY.md) before exposing
+them to anyone untrusted.
+
 ## Build
 
 ```sh
