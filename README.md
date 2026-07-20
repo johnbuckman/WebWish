@@ -30,9 +30,9 @@ that renders through SDL's software framebuffer path.
 
 > **Status: working alpha.** Display, mouse, keyboard (including control keys),
 > multi-command round-trips, per-session process spawn/reap, and single-port
-> multiplexing are all verified live on arm64 macOS. The driver is also
-> **verified to build and initialize on Linux** (against AndroWish's SDL2 fork,
-> in a Debian container) — see [docker/](docker/). It is a **patch into an SDL2
+> multiplexing are all verified live on arm64 macOS **and in the hardened Linux
+> container** (built against AndroWish's SDL2 fork — see [docker/](docker/)).
+> Tk menus are the known gap. It is a **patch into an SDL2
 > build tree**, not yet a drop-in library. See [Limitations](#limitations).
 
 > ## ⚠️ Security
@@ -183,21 +183,20 @@ SECURITY.md  threat model + defense-in-depth — READ BEFORE EXPOSING
 
 This is an honest alpha. Known defects and gaps:
 
-- **Mouse input does not reach the app in the Linux/container build** (keyboard
-  does). Verified with a probe app bound to `<Button-1>`/`<Motion>`: the browser
-  client sends correct mouse messages on the wire (`type=6`, press/release
-  flags, in-range coordinates) and the container is healthy, but no Tk mouse
-  events ever fire — while `<Key>` events arrive normally in the same session.
-  `SDL_SendMouseMotion` is gated behind `SDL_UpdateMouseFocus`, which is the
-  prime suspect. Earlier macOS testing with the driver's built-in server
-  reported working mouse, so this looks like a Linux-build or stdio-path
-  regression. **Keyboard-driven apps work; pointer-driven ones do not.**
+- **Tk menus do not post.** Clicking a menubutton (a `-menu` menubar entry, or
+  the undroidwish console's File/Edit) delivers the click to the app — a probe
+  app bound to `<Button-1>` reports it — but no menu ever appears. sdl2tk posts
+  menus as separate SDL windows carrying `SDL_WINDOW_POPUP_MENU`, and the
+  driver, like the `jsmpeg` driver it derives from, gives those windows a
+  surface but never composites or streams them. Everything else in a menubar-
+  free app works. Reproduced identically on macOS-native and in the Linux
+  container, so it is a driver gap, not a platform regression.
 
 Not yet done:
 
-- Built and verified **only on arm64 macOS**. The driver is written against
-  SDL2's internal video API and is not macOS-specific, but Linux/Windows/x86
-  builds are untried.
+- Display, mouse (motion, click, drag) and keyboard are verified working on
+  **arm64 macOS** and in the **Linux container** (x86-64 and arm64). Windows is
+  untried.
 - It's a **patch into an SDL2 build**, not a standalone shared library.
 - `server/spawn.adp` is **unauthenticated** — a DoS vector; add rate-limiting
   and a session cap before any public deployment.
