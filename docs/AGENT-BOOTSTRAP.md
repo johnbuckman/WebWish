@@ -5,7 +5,7 @@ you know nothing about this repo and records the things that are **not
 recoverable from the code**: why decisions were made, what was already tried and
 ruled out, and the traps that cost real debugging time.
 
-Written 2026-07-20, at commit `24ab2c5`.
+Written 2026-07-20; last updated at commit `cdd4c76`.
 
 - Repo: `https://github.com/johnbuckman/WebWish` (public, zlib licence, branch `main`)
 - Local: `~/Documents/webwish`
@@ -61,8 +61,10 @@ Verified live, in both tiles and AV1 where noted:
 6. No shared multi-viewer stream (each viewer drives its own private process).
 7. **The prebuilt images on the `v0.1.0-images` release predate resize** and the
    sdl2tk colour fix. Sessions from them stay at 1024×768 — harmlessly, since
-   the old driver ignores the unknown `INPUT_RESIZE` type. Refreshing them means
-   uploading release assets; that is a publishing action, so ask first.
+   the old driver ignores the unknown `INPUT_RESIZE` type. Locally rebuilt
+   images (`webwish/undroidwish:{latest, latest-amd64}`) are current and
+   verified; the *release assets* are not. Refreshing them means uploading
+   release assets, which is a publishing action — ask first.
 
 ---
 
@@ -174,10 +176,24 @@ swapped colours after a rotation.
 
 `docker/build-linux-binary.sh` applies this automatically and verifies it
 applied (it hard-fails if not). `patches/README.md` documents it for hand
-builds. It has **also been applied to the local AndroWish source tree at
-`~/iwish/src/androwish/jni/sdl2tk/sdl/SdlTkInt.c` and left UNCOMMITTED** — that
-file already carried ~282 lines of the owner's other in-progress work, so it
-must not be committed by an agent.
+builds.
+
+**Upstream status.** The same fix is committed in the local AndroWish tree as
+`bb36b583` on branch `perf/sdl2tk-dirty-rect` (**local only — not pushed**).
+Three things to know before touching that tree:
+
+- Its `origin` is **`charwliu/androwish`**, a *third party's* repository, and
+  the branch has never been pushed. Do not push there.
+- The tree carries **~52 files of unrelated uncommitted work** (blt, curl,
+  tkimg, libressl, SDL2's `configure`, and ~266 more unstaged lines in
+  `SdlTkInt.c` itself). The fix was committed alone by extracting just its hunk
+  into a patch and `git apply --cached`-ing it — **not** `git add`, which would
+  have swept all of that in. Use the same technique if you touch it again.
+- The repo had `user.name` but no `user.email`, so the first commit attempt
+  failed with "Author identity unknown". `user.email` is now set **locally**
+  (not `--global`) to `john@decentespresso.com`, matching that repo's own
+  history. Note this differs from the WebWish repo, which uses
+  `john@magnatune.com`.
 
 ---
 
@@ -355,7 +371,12 @@ avoid `xargs`; there is no `timeout`; `find` in pipelines needs
 ## 9. Working agreements
 
 - **Do not commit or push without the owner's explicit say-so.** This applies
-  doubly to `~/iwish/src/androwish`, which carries unrelated uncommitted work.
+  doubly to `~/iwish/src/androwish`: it carries ~52 files of unrelated
+  uncommitted work, and its `origin` belongs to a third party
+  (`charwliu/androwish`) — never push there.
+- When committing into a tree with unrelated dirty files, stage **only** your
+  hunk (`git apply --cached` with a hand-extracted patch), and print the staged
+  diff before committing to prove nothing else came along.
 - `/d` is under CVS — never `cvs commit`/`add` there. `/d/uw/` is not tracked.
 - Uploading GitHub release assets is publishing: ask first.
 - Report what was actually verified versus reasoned. Several conclusions in
