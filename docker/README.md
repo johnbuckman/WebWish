@@ -44,6 +44,15 @@ browser ──WSS──► reverse proxy (TLS, auth) ──► naviserver (serve
   "live (AV1)" via WebCodecs.
 - ✅ **x86_64 verified** — `docker run --platform linux/amd64` yields a genuine
   x86-64 ELF that runs and emits the handshake (emulated on Apple Silicon).
+- ✅ **Menus and browser-driven resize verified in the container** — a Tk
+  menubar posts, highlights and runs its command, and the session resizes
+  itself to the viewport with correct colours (this is what the sdl2tk
+  texture-format patch above is for).
+
+> ⚠️ **The prebuilt release images predate resize.** They were built before
+> `INPUT_RESIZE` and the sdl2tk texture-format fix, so a session from those
+> images stays at 1024×768 (the old driver ignores the unknown message type
+> rather than failing). Rebuild from source, or wait for refreshed assets.
 
 Already running NaviServer? See [../docs/DEPLOY-NAVISERVER.md](../docs/DEPLOY-NAVISERVER.md)
 for a no-build deployment onto an existing instance.
@@ -51,7 +60,8 @@ for a no-build deployment onto an existing instance.
 ## Prebuilt images (skip the build)
 
 Ready-to-run images are attached to the
-[v0.1.0-images release](https://github.com/johnbuckman/WebWish/releases/tag/v0.1.0-images):
+[v0.1.0-images release](https://github.com/johnbuckman/WebWish/releases/tag/v0.1.0-images)
+— note the staleness warning above; these are from before resize landed:
 
 | Asset | Arch | Codec | Tag inside |
 |---|---|---|---|
