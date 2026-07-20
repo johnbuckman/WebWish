@@ -64,5 +64,34 @@ Drop `-DWSTILES_HAVE_AV1 -I/opt/homebrew/include` to build **without** AV1
 
 ---
 
+## Also required when hosting sdl2tk (undroidwish / AndroWish)
+
+Not an SDL2 edit, but WebWish's browser-driven resize needs it. In
+`jni/sdl2tk/sdl/SdlTkInt.c`, the `SDL_WINDOWEVENT_SIZE_CHANGED` handler
+recreates the screen texture with `tfmt`:
+
+```c
+    newtex =
+        SDL_CreateTexture(SdlTkX.sdlrend,
+#ifdef ANDROID
+                          SDL_PIXELFORMAT_RGB888,
+#else
+                          tfmt,               /* <-- change to pfmt->format */
+#endif
+                          SDL_TEXTUREACCESS_STREAMING, width, height);
+```
+
+`tfmt` starts as `SDL_PIXELFORMAT_RGB888` and is only reassigned for 15/16/24
+bpp displays, so at 32 bpp the texture is tagged RGB888 while the surface it is
+fed from is ABGR8888. `SDL_UpdateTexture` copies those bytes raw, so **every
+pixel drawn after a resize comes out with R and B swapped** — a blue desktop
+turns brown. Change it to `pfmt->format`, matching the two other
+texture-creation sites in `SdlTkX.c`, which already carry fixes for exactly this
+swap.
+
+`docker/build-linux-binary.sh` applies this automatically.
+
+---
+
 See [../docs/BUILDING.md](../docs/BUILDING.md) for the full build + link recipe,
 including the flags the **final application** needs.

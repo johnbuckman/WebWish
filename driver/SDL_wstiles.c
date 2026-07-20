@@ -60,6 +60,13 @@
 #define INPUT_MOUSE (INPUT_MOUSE_BUTTON | INPUT_MOUSE_ABSOLUTE | INPUT_MOUSE_RELATIVE)
 #define INPUT_CLIPBOARD      0x0020
 #define INPUT_CONTROL        0x0040   /* [type][cq:le16] -> live AV1 quality */
+#define INPUT_RESIZE         0x0080   /* [type][w:le16][h:le16] -> resize session */
+
+/* Framebuffer bounds. The lower one keeps a hostile or buggy client from
+   asking for a 1-pixel screen; the upper one caps what one session can make
+   the server allocate and encode (2048x2048x4 = 16 MB per buffer). */
+#define WSTILES_MIN_DIM 160
+#define WSTILES_MAX_DIM 2048
 
 /* Input flags, little endian */
 #define KEY_DOWN     0x0001
@@ -97,6 +104,7 @@ typedef struct {
 } SDL_VideoData;
 
 typedef struct SDL_WindowData {
+    SDL_Window *window;    /* owning window; needed to drive a resize */
     SDL_Surface *surface;
     Uint32 *prev;          /* shadow copy of framebuffer for diffing */
     int prev_valid;
@@ -119,6 +127,8 @@ typedef struct SDL_WindowData {
     int hb_ticks;          /* heartbeat timer (detects a vanished idle client) */
     /* stdio transport: framed input on fd 0, framed frames on fd 1, no lws */
     int stdio;
+    int transport_up;      /* transport initialised once; survives a resize */
+    int pending_w, pending_h;  /* client-requested size, applied in PumpEvents */
     int need_handshake;    /* send the handshake as the first stdout message */
     unsigned char *inbuf;  /* accumulates a partial [u32 len][payload] message */
     int inbuf_len, inbuf_cap;
@@ -146,6 +156,8 @@ static void WSTILES_DestroyWindow(_THIS, SDL_Window *window);
 static int  WSTILES_CreateWindowFramebuffer(_THIS, SDL_Window *window, Uint32 *format, void **pixels, int *pitch);
 static int  WSTILES_UpdateWindowFramebuffer(_THIS, SDL_Window *window, const SDL_Rect *rects, int numrects);
 static void WSTILES_CleanupWindowData(SDL_WindowData *data);
+static void WSTILES_FreeSizeBuffers(SDL_WindowData *data);
+static void WSTILES_SendSizeHandshake(SDL_WindowData *data);
 static void WSTILES_DestroyWindowFramebuffer(_THIS, SDL_Window *window);
 static int  WSTILES_CallbackHTTP(struct lws *lws, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 static int  WSTILES_CallbackWS(struct lws *lws, enum lws_callback_reasons reason, void *user, void *in, size_t len);
@@ -170,6 +182,18 @@ static SDL_INLINE void puti16(unsigned char *p, int v)  /* big endian */
 
 static SDL_INLINE void puti32(unsigned char *p, int v)  /* big endian */
 { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v; }
+
+/* Clamp a requested framebuffer size into what we are willing to allocate.
+   Widths are rounded down to a multiple of 16: the AV1 encoder wants aligned
+   dimensions, and it costs at most 15 columns. */
+static void WSTILES_ClampSize(int *w, int *h)
+{
+    if (*w < WSTILES_MIN_DIM) *w = WSTILES_MIN_DIM;
+    if (*h < WSTILES_MIN_DIM) *h = WSTILES_MIN_DIM;
+    if (*w > WSTILES_MAX_DIM) *w = WSTILES_MAX_DIM;
+    if (*h > WSTILES_MAX_DIM) *h = WSTILES_MAX_DIM;
+    *w &= ~15;
+}
 
 /* .keyCode -> SDL scancode (subset; enough for common keys) */
 static const SDL_Scancode scancode_table[] = {
@@ -417,6 +441,7 @@ WSTILES_VideoInit(_THIS)
     SDL_VideoDisplay display;
     SDL_DisplayMode mode;
     SDL_Mouse *mouse;
+    const char *env;
 
     /* Force SDL's software renderer backed by our window framebuffer, and
        disable the (macOS-default) texture framebuffer that would require an
@@ -426,10 +451,19 @@ WSTILES_VideoInit(_THIS)
     SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0");
 
     SDL_zero(display);
-    mode.w = 2048; mode.h = 2048; mode.refresh_rate = 0;
+    mode.w = WSTILES_MAX_DIM; mode.h = WSTILES_MAX_DIM; mode.refresh_rate = 0;
     mode.format = SDL_PIXELFORMAT_ABGR8888;
     display.desktop_mode = mode;
+
+    /* Startup size: SDL_VIDEO_WSTILES_SIZE=WxH, else 1024x768. The browser can
+       still resize the session afterwards (INPUT_RESIZE). */
     mode.w = 1024; mode.h = 768;
+    env = SDL_getenv("SDL_VIDEO_WSTILES_SIZE");
+    if (env != NULL) {
+        int ew = 0, eh = 0;
+        if (SDL_sscanf(env, "%dx%d", &ew, &eh) == 2)
+            WSTILES_ClampSize(&ew, &eh), mode.w = ew, mode.h = eh;
+    }
     display.current_mode = mode;
     display.driverdata = _this->driverdata;
     SDL_AddVideoDisplay(&display);
@@ -611,6 +645,14 @@ WSTILES_HandleInput(SDL_WindowData *data, unsigned char *p, int len)
                 SDL_SendMouseButton(mouse->focus, mouse->mouseID,
                                     (flags & MOUSE_2_DOWN) ? SDL_PRESSED : SDL_RELEASED, SDL_BUTTON_RIGHT);
         }
+    } else if (type & INPUT_RESIZE) {
+        /* Recorded here, applied in PumpEvents: this runs inside the transport
+           service, and resizing reallocates the very buffers being drained. */
+        if (len >= 6) {
+            int rw = geti16(p + 2), rh = geti16(p + 4);
+            WSTILES_ClampSize(&rw, &rh);
+            data->pending_w = rw; data->pending_h = rh;
+        }
     } else if (type & INPUT_CONTROL) {
         if (len >= 4) {
             int cq = geti16(p + 2);
@@ -633,6 +675,29 @@ WSTILES_HandleInput(SDL_WindowData *data, unsigned char *p, int len)
     }
 }
 
+/* 'wtil' + width + height + codec. Sent to a client on connect, and again to
+   everyone whenever the framebuffer is resized -- the client treats it as
+   "this is the size now" and re-sizes its canvas, so the two stay in step. */
+static void
+WSTILES_SendSizeHandshake(SDL_WindowData *data)
+{
+    Frame *hs;
+    unsigned char *q;
+
+    if (data->surface == NULL) return;
+    hs = (Frame *) SDL_malloc(sizeof(Frame) + LWS_PRE + 9);
+    if (hs == NULL) return;
+    hs->ref_count = 1; hs->size = 9; hs->type = LWS_WRITE_BINARY; hs->data = hs + 1;
+    q = (unsigned char *) hs->data + LWS_PRE;
+    q[0]='w'; q[1]='t'; q[2]='i'; q[3]='l';
+    puti16(q + 4, data->surface->w);
+    puti16(q + 6, data->surface->h);
+    q[8] = (unsigned char) data->codec;
+    WSTILES_SendFrame(data, hs);
+    data->force_full = 1;      /* nothing on the client's canvas is reusable */
+    data->force_kf = 1;
+}
+
 /* Send the handshake, drain framed input from stdin, detect EOF. */
 static void
 WSTILES_StdioService(SDL_WindowData *data)
@@ -641,20 +706,9 @@ WSTILES_StdioService(SDL_WindowData *data)
     int off;
 
     if (data->need_handshake) {
-        Frame *hs = (Frame *) SDL_malloc(sizeof(Frame) + LWS_PRE + 9);
-        if (hs) {
-            unsigned char *q;
-            hs->ref_count = 1; hs->size = 9; hs->type = LWS_WRITE_BINARY; hs->data = hs + 1;
-            q = (unsigned char *) hs->data + LWS_PRE;
-            q[0]='w'; q[1]='t'; q[2]='i'; q[3]='l';
-            puti16(q + 4, data->surface->w); puti16(q + 6, data->surface->h);
-            q[8] = (unsigned char) data->codec;
-            WSTILES_SendFrame(data, hs);
-        }
+        WSTILES_SendSizeHandshake(data);
         data->need_handshake = 0;
         data->ever_connected = 1;
-        data->force_full = 1;
-        data->force_kf = 1;
     }
 
     for (;;) {                                   /* fd 0 is non-blocking */
@@ -907,6 +961,28 @@ WSTILES_PumpEvents(_THIS)
         }
     }
 
+    /* Apply a browser-requested resize. Done here rather than in the input
+       handler because that runs inside the transport service, which is
+       draining the very buffers a resize reallocates. */
+    if (data->pending_w != 0) {
+        int nw = data->pending_w, nh = data->pending_h;
+        data->pending_w = data->pending_h = 0;
+        if (data->window != NULL && data->surface != NULL &&
+            (nw != data->surface->w || nh != data->surface->h)) {
+            SDL_VideoDisplay *disp = SDL_GetDisplayForWindow(data->window);
+            if (disp != NULL) {
+                /* Keep the "screen" in step with the window, or Tk will think
+                   it has more room than the framebuffer really has. */
+                disp->current_mode.w = nw;
+                disp->current_mode.h = nh;
+            }
+            /* Invalidates the surface and posts SIZE_CHANGED; SDL calls back
+               into CreateWindowFramebuffer, which reallocates and re-announces
+               the size to the client. */
+            SDL_SetWindowSize(data->window, nw, nh);
+        }
+    }
+
     ticks = SDL_GetTicks();
     if (ticks - data->ticks0 >= 30) {         /* ~33 Hz coalescing cap */
         data->ticks0 = ticks;
@@ -959,6 +1035,7 @@ WSTILES_CreateWindow(_THIS, SDL_Window *window)
 
     data = SDL_calloc(1, sizeof(*data));
     if (data == NULL) return SDL_OutOfMemory();
+    data->window = window;
     window->driverdata = data;
 
     if (!hidden) {
@@ -989,9 +1066,15 @@ WSTILES_CreateWindowFramebuffer(_THIS, SDL_Window *window, Uint32 *format, void 
     const char *env;
     struct lws_context_creation_info info;
     SDL_bool hidden;
+    int resized;
 
     data = (SDL_WindowData *) window->driverdata;
-    WSTILES_CleanupWindowData(data);
+    resized = data->transport_up;   /* re-entry == the session is being resized */
+    /* SDL re-enters here after a resize (SDL_OnWindowResized invalidates the
+       surface) without calling DestroyWindowFramebuffer first. Only the
+       size-dependent buffers may be dropped: tearing down the transport would
+       disconnect the very browser that asked to resize. */
+    WSTILES_FreeSizeBuffers(data);
 
     SDL_PixelFormatEnumToMasks(surface_format, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
     SDL_GetWindowSize(window, &w, &h);
@@ -1015,6 +1098,11 @@ WSTILES_CreateWindowFramebuffer(_THIS, SDL_Window *window, Uint32 *format, void 
     if (data->scratch_rgba == NULL || data->scratch_comp == NULL) {
         WSTILES_CleanupWindowData(data); return SDL_OutOfMemory();
     }
+
+    /* Everything below is one-time transport setup: on a resize we keep the
+       existing lws context, its clients, and the codec/auth settings. */
+    if (data->transport_up) goto done;
+    data->transport_up = 1;
 
     data->clients = NULL;
     SDL_memset(&info, 0, sizeof(info));
@@ -1054,6 +1142,11 @@ WSTILES_CreateWindowFramebuffer(_THIS, SDL_Window *window, Uint32 *format, void 
     }
 
 done:
+    /* A re-entry means the size changed under a live session: tell the client
+       so its canvas follows, and resend everything. (First time through, the
+       handshake is sent on connect instead.) */
+    if (resized) WSTILES_SendSizeHandshake(data);
+
     *format = surface_format;
     *pixels = data->surface->pixels;
     *pitch = data->surface->pitch;
@@ -1067,22 +1160,34 @@ WSTILES_UpdateWindowFramebuffer(_THIS, SDL_Window *window, const SDL_Rect *rects
     return 0;
 }
 
+/* Free only what depends on the framebuffer size. A resize goes through here;
+   the transport (lws context / stdio state, and the connected clients with it)
+   must survive, or resizing would drop the session. */
 static void
-WSTILES_CleanupWindowData(SDL_WindowData *data)
+WSTILES_FreeSizeBuffers(SDL_WindowData *data)
 {
     if (data->surface != NULL) { SDL_FreeSurface(data->surface); data->surface = NULL; }
     if (data->prev != NULL) { SDL_free(data->prev); data->prev = NULL; }
     if (data->scratch_rgba != NULL) { SDL_free(data->scratch_rgba); data->scratch_rgba = NULL; }
     if (data->scratch_comp != NULL) { SDL_free(data->scratch_comp); data->scratch_comp = NULL; }
-    if (data->inbuf != NULL) { SDL_free(data->inbuf); data->inbuf = NULL; }
-    if (data->lws != NULL) { lws_context_destroy(data->lws); data->lws = NULL; }
+    data->prev_valid = 0;
 #ifdef WSTILES_HAVE_AV1
+    /* Dimensions are baked into the encoder config; it re-inits lazily. */
     if (data->av1_ready) {
         aom_codec_destroy(&data->av1_codec);
         aom_img_free(&data->av1_img);
         data->av1_ready = 0;
     }
 #endif
+}
+
+static void
+WSTILES_CleanupWindowData(SDL_WindowData *data)
+{
+    WSTILES_FreeSizeBuffers(data);
+    if (data->inbuf != NULL) { SDL_free(data->inbuf); data->inbuf = NULL; }
+    if (data->lws != NULL) { lws_context_destroy(data->lws); data->lws = NULL; }
+    data->transport_up = 0;
 }
 
 static void

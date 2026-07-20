@@ -21,6 +21,7 @@
   var INPUT_MOUSE_ABSOLUTE = 0x0004;
   var INPUT_MOUSE_WHEEL = 0x0010;
   var INPUT_CONTROL = 0x0040;
+  var INPUT_RESIZE = 0x0080;
 
   var KEY_DOWN = 0x0001;
   var KEY_PRESS = 0x0002;
@@ -42,6 +43,11 @@
     if (typeof VideoDecoder === "undefined") {
       setStatus("AV1 mode but this browser lacks WebCodecs VideoDecoder");
       return;
+    }
+    // A resize re-configures the stream, so discard any decoder for the old size.
+    if (videoDecoder) {
+      try { videoDecoder.close(); } catch (e) {}
+      videoDecoder = null;
     }
     videoDecoder = new VideoDecoder({
       output: function (frame) { try { ctx.drawImage(frame, 0, 0); } finally { frame.close(); } },
@@ -72,6 +78,55 @@
     if (ws && ws.readyState === 1) ws.send(b);
   };
   window.wstilesInfo = function () { return { codec: statCodec, cq: statCQ }; };
+
+  // ---- auto-resize: keep the session the size of the space we can show it in ----
+  // Opt out with window.WSTILES_AUTORESIZE = false before this script loads, for
+  // apps that are laid out for one fixed size.
+  var lastReqW = 0, lastReqH = 0, resizeTimer = null;
+  var MARGIN = 8;   // keeps a scrollbar from appearing and re-triggering us
+
+  function wantedSize() {
+    // Measure against the viewport, not the canvas's parent: the parent is
+    // often a shrink-to-fit wrapper whose width says nothing about the room
+    // available. documentElement.clientWidth/Height exclude scrollbars.
+    var docEl = document.documentElement;
+    var vw = docEl.clientWidth || window.innerWidth || 0;
+    var vh = docEl.clientHeight || window.innerHeight || 0;
+    if (!vw || !vh) return [0, 0];
+    var r = canvas.getBoundingClientRect();
+    // Fill from wherever the canvas sits to the bottom-right of the viewport,
+    // leaving a small margin so the page never gains a scrollbar (which would
+    // shrink the viewport and trigger another resize).
+    var w = Math.floor(vw - (r.left + (window.scrollX || 0)) - MARGIN);
+    var h = Math.floor(vh - (r.top + (window.scrollY || 0)) - MARGIN);
+    return [w, h];
+  }
+
+  function sendResize() {
+    if (window.WSTILES_AUTORESIZE === false) return;
+    if (!ws || ws.readyState !== 1) return;
+    var s = wantedSize(), w = s[0], h = s[1];
+    if (w < 160 || h < 160) return;
+    // The driver rounds width down to a multiple of 16, so an exact match is
+    // not expected; comparing against the last *request* is what stops a
+    // request/resize/request feedback loop.
+    if (w === lastReqW && h === lastReqH) return;
+    // Hysteresis: ignore small deltas from the size we already have. Growing
+    // the canvas can add a scrollbar, which shrinks the viewport, which would
+    // ask for a smaller size, and so on -- a few pixels are not worth a loop.
+    if (Math.abs(w - canvas.width) < 32 && Math.abs(h - canvas.height) < 32) return;
+    lastReqW = w; lastReqH = h;
+    var b = new ArrayBuffer(6), d = new DataView(b);
+    d.setUint16(0, INPUT_RESIZE, true);
+    d.setUint16(2, w, true);
+    d.setUint16(4, h, true);
+    ws.send(b);
+  }
+
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(sendResize, 250);   // settle before asking
+  });
   setInterval(function () {
     if (typeof window.wstilesOnStats === "function") window.wstilesOnStats(statBytes, statCodec);
     statBytes = 0;
@@ -92,6 +147,7 @@
 
   function startSession() {
     haveSize = false;
+    lastReqW = lastReqH = 0;
     if (videoDecoder) { try { videoDecoder.close(); } catch (e) {} videoDecoder = null; }
     if (fixedUrl) { openWS(fixedUrl, 0); return; }
     if (!spawnUrl) { setStatus("no session endpoint configured"); return; }
@@ -133,25 +189,28 @@
     var dv = new DataView(buf);
     statBytes += buf.byteLength;
 
-    if (!haveSize) {
-      // Handshake: 'wtil' + width(be16) + height(be16)
-      if (dv.getUint8(0) === 0x77 && dv.getUint8(1) === 0x74 &&
-          dv.getUint8(2) === 0x69 && dv.getUint8(3) === 0x6c) {
-        var w = dv.getUint16(4, false);
-        var h = dv.getUint16(6, false);
-        var codec = buf.byteLength >= 9 ? dv.getUint8(8) : 0;  // 0=tiles, 1=AV1
-        canvas.width = w;
-        canvas.height = h;
-        ctx.fillStyle = "#004e78";
-        ctx.fillRect(0, 0, w, h);
-        haveSize = true;
-        statCodec = codec === 1 ? "av1" : "tiles";
-        if (codec === 1) { setupAV1(w, h); setStatus("live (AV1) — " + w + "×" + h); }
-        else setStatus("live (tiles) — " + w + "×" + h);
-        return;
-      }
+    // 'wtil' announces the framebuffer size. It arrives once on connect and
+    // again after every resize, so it is accepted at any point in the stream.
+    // Data frames start with a big-endian type of 0x000001Fx, which can never
+    // collide with this magic.
+    if (dv.getUint8(0) === 0x77 && dv.getUint8(1) === 0x74 &&
+        dv.getUint8(2) === 0x69 && dv.getUint8(3) === 0x6c) {
+      var w = dv.getUint16(4, false);
+      var h = dv.getUint16(6, false);
+      var codec = buf.byteLength >= 9 ? dv.getUint8(8) : 0;  // 0=tiles, 1=AV1
+      canvas.width = w;      // also clears the canvas
+      canvas.height = h;
+      ctx.fillStyle = "#004e78";
+      ctx.fillRect(0, 0, w, h);
+      haveSize = true;
+      statCodec = codec === 1 ? "av1" : "tiles";
+      if (codec === 1) { setupAV1(w, h); setStatus("live (AV1) — " + w + "×" + h); }
+      else setStatus("live (tiles) — " + w + "×" + h);
+      // Ask for the size we can actually display, once layout has settled.
+      setTimeout(sendResize, 0);
       return;
     }
+    if (!haveSize) return;
 
     var type = dv.getUint32(0, false); // big endian
     // size = dv.getUint32(4,false); // == buf.byteLength

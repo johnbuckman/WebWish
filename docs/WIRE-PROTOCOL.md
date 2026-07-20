@@ -12,7 +12,8 @@ The WebSocket subprotocol is `ws`. All messages are binary frames.
 
 ## Handshake (server → client, first message)
 
-Sent once, immediately, as a **raw 9-byte message with no frame header**:
+Sent immediately on connect, as a **raw 9-byte message with no frame header** —
+and again, unchanged in form, every time the framebuffer is resized:
 
 ```
 offset  size  field
@@ -23,7 +24,12 @@ offset  size  field
 ```
 
 The client sizes its canvas to width×height and picks its decode path from
-`codec`.
+`codec`. Because it can arrive at any point in the stream, a client must test
+every message for the `wtil` magic before treating it as a frame — the magic
+cannot collide with a frame header, whose first four bytes are always
+`0x000001Fx`. On receiving it mid-stream the client re-sizes (and clears) its
+canvas and, in AV1 mode, re-configures its decoder for the new dimensions; the
+driver follows it with a full repaint / keyframe.
 
 ---
 
@@ -70,9 +76,20 @@ payload follow, all little-endian.
 | `0x0010` | MOUSE_WHEEL | `flags` (u16 LE) · `dx` (f32 LE) · `dy` (f32 LE) |
 | `0x0020` | CLIPBOARD | UTF-32 code points (u16 LE each in the current build) |
 | `0x0040` | CONTROL | `cq` (u16 LE) — live AV1 quality level |
+| `0x0080` | RESIZE | `w` (u16 LE) · `h` (u16 LE) — request a new framebuffer size |
 
 Mouse messages set `MOUSE_BUTTON | MOUSE_ABSOLUTE` together so position and
 button state arrive in one packet.
+
+### RESIZE
+
+The client asks for the size it can actually display; the driver clamps to
+160..2048 in each axis and rounds the width down to a multiple of 16 (the AV1
+encoder wants aligned dimensions), so the size it grants is usually not exactly
+the one requested. The grant is announced by a fresh `wtil` handshake — clients
+should follow that, never assume their request was honoured verbatim, and
+compare against their own last *request* rather than the granted size when
+deciding whether to ask again, or a request/grant/request loop can develop.
 
 ### KEY flags
 

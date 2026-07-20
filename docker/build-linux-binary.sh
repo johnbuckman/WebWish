@@ -78,6 +78,21 @@ MK
 [ "$AV1" = 1 ] && perl -pi -e 's/(-MMD -MT \$\@)/-DWSTILES_HAVE_AV1 $1/' "$SDL/Makefile.in"
 echo "wstiles wired into SDL2 fork ${AVDEF:+(+AV1)}"
 
+echo "### fix sdl2tk's root-resize texture format"
+# On a root resize sdl2tk recreates its screen texture with `tfmt`, which is
+# only ever assigned for 15/16/24bpp displays -- at 32bpp it keeps its
+# SDL_PIXELFORMAT_RGB888 initialiser while the surface it is fed from is
+# ABGR8888. SDL_UpdateTexture copies those bytes raw, so every pixel drawn
+# after a resize comes out with R and B swapped (blue desktop turns brown).
+# The two other texture-creation sites in SdlTkX.c already use the surface's
+# own format; this third one in SdlTkInt.c was missed. Without this, WebWish's
+# browser-driven resize repaints the whole UI in the wrong colours.
+perl -0pi -e 's/(\n\t\t\t\t  )tfmt,(\n#endif\n\t\t\t\t  SDL_TEXTUREACCESS_STREAMING)/$1pfmt->format,$2/' \
+  "$AW/jni/sdl2tk/sdl/SdlTkInt.c"
+grep -q 'pfmt->format,' "$AW/jni/sdl2tk/sdl/SdlTkInt.c" || {
+  echo "FAILED to patch SdlTkInt.c resize texture format" >&2; exit 1; }
+echo "sdl2tk resize texture format fixed"
+
 echo "### patch the linux64 build script"
 BS=$AW/undroid/build-undroidwish-linux64.sh
 cp "$BS" "$BS.orig"

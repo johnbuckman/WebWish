@@ -56,6 +56,10 @@ that renders through SDL's software framebuffer path.
 - Every frame it diffs the framebuffer against a shadow copy on a **64×64 tile
   grid** and sends only the changed tiles, each **zlib-deflated** (lossless;
   a flat UI's first paint drops from ~3 MB to ~19 KB, ~160×).
+- The session sizes itself to the browser: on connect (and on window resize)
+  the client asks for the space it can display, and the driver reallocates the
+  framebuffer, tells the app, and announces the new size. Opt out per page with
+  `window.WSTILES_AUTORESIZE = false`, or cap it with `SDL_VIDEO_WSTILES_SIZE`.
 - Optionally (`SDL_VIDEO_WSTILES_CODEC=av1`) it hands the whole changed frame
   to a realtime **AV1** encoder (libaom, `tune=screen`) with a live quality
   knob; the browser decodes it with **WebCodecs**. Tiles win on flat UI, AV1
@@ -147,6 +151,7 @@ directory URL loads it.
 | `SDL_VIDEO_WSTILES_CODEC=av1` | whole-screen AV1 instead of lossless tiles |
 | `SDL_VIDEO_WSTILES_CQ=<12..63>` | AV1 constant-quality level (lower = sharper/bigger) |
 | `SDL_VIDEO_WSTILES_ONESHOT=1` | exit when the last client disconnects |
+| `SDL_VIDEO_WSTILES_SIZE=WxH` | maximum framebuffer size (default 1024×768) |
 
 ---
 
@@ -193,9 +198,6 @@ SECURITY.md  threat model + defense-in-depth — READ BEFORE EXPOSING
 
 This is an honest alpha. Known defects and gaps:
 
-- **The app is fixed at 1024×768.** `WSTILES_VideoInit` hardcodes the mode, the
-  wire protocol has no resize message, and the client never reports the browser
-  viewport — so every session is the same size whatever it is viewed on.
 - **No touch input.** The client binds mouse events only, so phones and tablets
   cannot drive a session.
 - **Clipboard is one-way.** Server→browser clipboard frames arrive and the
