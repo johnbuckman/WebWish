@@ -47,7 +47,14 @@
 <script>
   // Each page load spawns its own private undroidwish; the endpoint returns the
   // port it listens on. The process is killed when this connection drops.
-  window.WSTILES_URL = "ws://" + location.host + "/uw/stream-docker.adp";
+  // Connect to stream.adp sitting NEXT TO this page, wherever that is — so the
+  // whole directory can be dropped anywhere in a docroot with no edits. Also
+  // upgrades to wss:// automatically when the page is served over https.
+  (function () {
+    var dir   = location.pathname.replace(/[^\/]*$/, "");   // ".../"  (works for /dir/ or /dir/index.adp)
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    window.WSTILES_URL = proto + location.host + dir + "stream.adp";
+  })();
 
   // Live bandwidth meter (updated once/sec by wstiles.js).
   window.wstilesOnStats = function (bytes, codec) {

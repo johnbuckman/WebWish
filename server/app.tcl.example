@@ -1,0 +1,28 @@
+# WebWish sample app.
+#
+# Rename this file to  app.tcl  (in this same directory) and it will run
+# automatically for every browser session, instead of undroidwish's default
+# Tcl console. Delete/rename it to get the console back.
+#
+# It is plain Tcl/Tk — anything undroidwish can run works here.
+
+wm title . "Hello from WebWish"
+
+pack [label .title -text "This Tk app is running on the server." \
+        -font {Helvetica 20 bold} -pady 12]
+
+pack [label .info -text "Rendered to your browser by the wstiles SDL driver." -pady 4]
+
+set n 0
+pack [button .b -text "Click me" -font {Helvetica 16} -command {
+    incr ::n
+    .out configure -text "clicked $::n time[expr {$::n == 1 ? {} : {s}}]"
+}] -pady 8
+
+pack [label .out -text "clicked 0 times" -font {Helvetica 14}] -pady 4
+
+# a little canvas so there is something to drag on
+pack [canvas .c -width 420 -height 200 -bg white -highlightthickness 1] -pady 10
+bind .c <B1-Motion> {.c create oval [expr {%x-4}] [expr {%y-4}] \
+                                    [expr {%x+4}] [expr {%y+4}] -fill "#0a6" -outline ""}
+pack [label .hint -text "drag on the white area to draw" -fg gray40] -pady 2

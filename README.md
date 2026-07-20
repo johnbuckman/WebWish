@@ -181,7 +181,19 @@ SECURITY.md  threat model + defense-in-depth — READ BEFORE EXPOSING
 
 ## Limitations
 
-This is an honest alpha. Not yet done:
+This is an honest alpha. Known defects and gaps:
+
+- **Mouse input does not reach the app in the Linux/container build** (keyboard
+  does). Verified with a probe app bound to `<Button-1>`/`<Motion>`: the browser
+  client sends correct mouse messages on the wire (`type=6`, press/release
+  flags, in-range coordinates) and the container is healthy, but no Tk mouse
+  events ever fire — while `<Key>` events arrive normally in the same session.
+  `SDL_SendMouseMotion` is gated behind `SDL_UpdateMouseFocus`, which is the
+  prime suspect. Earlier macOS testing with the driver's built-in server
+  reported working mouse, so this looks like a Linux-build or stdio-path
+  regression. **Keyboard-driven apps work; pointer-driven ones do not.**
+
+Not yet done:
 
 - Built and verified **only on arm64 macOS**. The driver is written against
   SDL2's internal video API and is not macOS-specific, but Linux/Windows/x86

@@ -22,6 +22,16 @@ IMAGE="${WEBWISH_IMAGE:-webwish/undroidwish:latest}"
 MEM="${WEBWISH_MEMORY:-256m}"
 PIDS="${WEBWISH_PIDS:-128}"
 
+# Optional app script: WEBWISH_APP=/path/to/app.tcl (or pass it as $1). It is
+# bind-mounted read-only into the container and handed to undroidwish as its
+# script argument, so that app runs instead of the default Tcl console.
+# stream.adp sets this automatically when an app.tcl sits next to it.
+APP="${WEBWISH_APP:-${1:-}}"
+if [ -n "$APP" ] && [ ! -r "$APP" ]; then
+  echo "run-session.sh: app script not readable: $APP" >&2
+  exit 1
+fi
+
 exec docker run --rm -i \
   --network none \
   --read-only \
@@ -35,7 +45,8 @@ exec docker run --rm -i \
   --ulimit nofile=256:256 \
   ${WEBWISH_CODEC:+-e SDL_VIDEO_WSTILES_CODEC=$WEBWISH_CODEC} \
   ${WEBWISH_RUNTIME:+--runtime "$WEBWISH_RUNTIME"} \
-  "$IMAGE"
+  ${APP:+-v "$APP":/app/app.tcl:ro} \
+  "$IMAGE" ${APP:+/app/app.tcl}
 
 # Notes:
 # - --network none    : the app cannot reach the network at all (no SSRF/exfil).

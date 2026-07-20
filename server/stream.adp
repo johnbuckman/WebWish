@@ -1,16 +1,31 @@
 <%
-# WebSocket <-> undroidwish-stdio bridge, OFF the conn thread (scalable).
+# WebSocket <-> undroidwish bridge, ONE HARDENED CONTAINER PER SESSION.
 #
-# The conn handler does the WS handshake, detaches the socket into a global
-# ns_connchan, registers an async input callback, hands the output pump to a
-# per-session ns_thread, and RETURNS -- so the conn-thread pool is never pinned
-# (unlike the earlier while{1}+after loop). One undroidwish child per client.
+# The child is not a bare process but a locked-down, ephemeral Docker container
+# (see run-session.sh in this directory):
+# --network none, read-only rootfs, non-root, cap-drop ALL, pid/mem/cpu caps.
+# The container speaks stdio framing (SDL_VIDEO_WSTILES_STDIO=1, set in the
+# image), so `docker run -i` wires the container's stdin/stdout straight to
+# this pipe -- no per-session port, and the container is destroyed the instant
+# this WebSocket closes (--rm). See ../SECURITY.md.
 #
-#   input : browser --ws--> uw_input callback (sockcallback thread, manual WS
-#           decode) --nsv uwq--> uw_drain (session thread) --> child stdin
-#   output: child stdout --fileevent--> uw_out (session thread) --ns_connchan
-#           write--> browser
+# SELF-LOCATING: everything is found relative to THIS file's own directory, so
+# you can drop this whole directory anywhere in your docroot with no edits.
 #
+#   <dir>/index.adp        the page          (auto-loads as the directory index)
+#   <dir>/stream.adp       this bridge
+#   <dir>/run-session.sh   the hardened `docker run`
+#   <dir>/wstiles.js       the browser client
+#   <dir>/app.tcl          OPTIONAL — your Tcl/Tk app; auto-runs if present
+#
+set HERE   [file dirname [ns_url2file [ns_conn url]]]
+set RUNNER [file join $HERE run-session.sh]
+set APP    [file join $HERE app.tcl]
+# Drop an app.tcl next to this file and it becomes the app the session runs;
+# with no app.tcl you get undroidwish's default Tcl console.
+set APPENV ""
+if {[file readable $APP]} { set APPENV "{WEBWISH_APP=$APP} " }
+
 set hdrs [ns_conn headers]
 set key [ns_set iget $hdrs "sec-websocket-key"]
 if {$key eq ""} { ns_return 400 text/plain "expected websocket upgrade"; return }
@@ -21,7 +36,6 @@ set proto [ns_set iget $hdrs "sec-websocket-protocol"]
 set extra ""
 if {$proto ne ""} { set extra "Sec-WebSocket-Protocol: [string trim [lindex [split $proto ,] 0]]\r\n" }
 
-# Input callback runs in the sockcallback thread -> must be in the blueprint.
 ns_eval {
     proc uw_input {sock cond} {
         if {$cond ne "r"} { catch {nsv_set uwdead $sock 1}; return 0 }
@@ -50,23 +64,15 @@ ns_connchan write $sock "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\
 nsv_set uwq $sock {}; nsv_set uwbuf $sock ""; nsv_set uwdead $sock 0
 ns_connchan callback $sock [list uw_input $sock] r
 
-# Per-session output pump on its own thread; conn thread returns immediately.
-set body [string map [list @SOCK@ $sock] {
+set body [string map [list @SOCK@ $sock @RUNNER@ $RUNNER @APPENV@ $APPENV] {
     set sock {@SOCK@}
-    catch {file delete /tmp/uwrx.log}
-    proc uwlog {m} { catch { set f [open /tmp/uwrx.log a]; puts $f $m; close $f } }
-    uwlog "session thread up sock=$sock"
-    if {[catch {open "|env SDL_VIDEODRIVER=wstiles SDL_VIDEO_WSTILES_STDIO=1 SDL_VIDEO_WSTILES_CODEC=av1 /path/to/undroidwish-wstiles 2>/tmp/uwchild.log" r+} pipe]} {
-        uwlog "open pipe FAILED: $pipe"; catch {ns_connchan close $sock}; return
-    }
+    # The container IS the child. Closing this pipe -> docker run exits -> --rm.
+    if {[catch {open "|/usr/bin/env @APPENV@{@RUNNER@} 2>>/tmp/uwchild.log" r+} pipe]} { catch {ns_connchan close $sock}; return }
     fconfigure $pipe -translation binary -blocking 0
     set cpid [pid $pipe]
-    uwlog "child pid=$cpid"
     set ::pbuf ""
-
     proc uw_dead {sock} { if {[catch {nsv_get uwdead $sock} d]} { return 1 }; return $d }
     proc uw_fin {sock pipe cpid} {
-        uwlog "fin sock=$sock"
         catch {ns_connchan close $sock}; catch {close $pipe}; catch {exec kill $cpid}
         foreach v {uwq uwbuf uwdead} { catch {nsv_unset $v $sock} }
         set ::uw_done 1
@@ -81,27 +87,20 @@ set body [string map [list @SOCK@ $sock] {
                 if {[string length $::pbuf]-4 < $n} break
                 set pay [string range $::pbuf 4 [expr {3+$n}]]
                 set ::pbuf [string range $::pbuf [expr {4+$n}] end]
-                if {[catch {ns_connchan write $sock [ns_connchan wsencode -binary -opcode binary $pay]}]} {
-                    uwlog "ws write fail"; catch {nsv_set uwdead $sock 1}; uw_fin $sock $pipe $cpid; return
-                }
+                if {[catch {ns_connchan write $sock [ns_connchan wsencode -binary -opcode binary $pay]}]} { catch {nsv_set uwdead $sock 1}; uw_fin $sock $pipe $cpid; return }
             }
         }
-        if {[eof $pipe]} { uwlog "child eof"; uw_fin $sock $pipe $cpid; return }
+        if {[eof $pipe]} { uw_fin $sock $pipe $cpid; return }
     }
     proc uw_drain {sock pipe cpid} {
         if {[uw_dead $sock]} { uw_fin $sock $pipe $cpid; return }
         set q {}; catch {nsv_get uwq $sock} q
-        if {[llength $q]} {
-            nsv_set uwq $sock {}
-            foreach m $q { catch {puts -nonewline $pipe [binary format Ia* [string length $m] $m]; flush $pipe} }
-        }
+        if {[llength $q]} { nsv_set uwq $sock {}; foreach msg $q { catch {puts -nonewline $pipe [binary format Ia* [string length $msg] $msg]; flush $pipe} } }
         after 8 [list uw_drain $sock $pipe $cpid]
     }
-
     fileevent $pipe readable [list uw_out $sock $pipe $cpid]
     after 8 [list uw_drain $sock $pipe $cpid]
     vwait ::uw_done
-    uwlog "session thread exit"
 }]
 ns_thread begindetached $body
 %>
