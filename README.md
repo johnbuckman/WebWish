@@ -1,6 +1,6 @@
 # WebWish
 
-**Serve any Androwish, undroidwish or Tcl / Tk desktop app as a web app.**
+**Serve any Androwish, undroidwish or Tcl / Tk desktop app as a web app using Naviserver.**
 
 ![WebWish — undroidwish Tk apps (starDOM XML editor + a TkTable spreadsheet) rendered and driven live in a browser tab](webwish-demo.png)
 
