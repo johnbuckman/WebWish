@@ -45,6 +45,9 @@ browser ──WSS──► reverse proxy (TLS, auth) ──► naviserver (serve
 - ✅ **x86_64 verified** — `docker run --platform linux/amd64` yields a genuine
   x86-64 ELF that runs and emits the handshake (emulated on Apple Silicon).
 
+Already running NaviServer? See [../docs/DEPLOY-NAVISERVER.md](../docs/DEPLOY-NAVISERVER.md)
+for a no-build deployment onto an existing instance.
+
 ## Prebuilt images (skip the build)
 
 Ready-to-run images are attached to the

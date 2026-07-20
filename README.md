@@ -94,6 +94,10 @@ Put a WebSocket bridge in front to see it in a browser — the repo ships one
 (`server/stream-docker.adp` + `server/democ.adp`, driven by
 [`docker/run-session.sh`](docker/run-session.sh)). See [docker/README.md](docker/README.md).
 
+**Already running NaviServer?** [docs/DEPLOY-NAVISERVER.md](docs/DEPLOY-NAVISERVER.md)
+walks through serving WebWish from an existing instance (macOS or Linux) with no
+build at all: load an image, copy three files, edit one path.
+
 ### From source
 
 To build the driver into your own SDL2 app, you need to compile SDL2 with it and
@@ -157,7 +161,7 @@ server/    NaviServer reference bridge (.adp) + a copy of the browser client
            stream-docker.adp — bridge variant: one hardened container per session
 docker/    Linux build recipe + hardened per-session container runtime
 patches/   the edits needed to wire the driver into an SDL2 tree
-docs/      BUILDING.md, WIRE-PROTOCOL.md
+docs/      BUILDING.md, WIRE-PROTOCOL.md, DEPLOY-NAVISERVER.md
 SECURITY.md  threat model + defense-in-depth — READ BEFORE EXPOSING
 ```
 
