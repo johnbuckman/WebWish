@@ -200,6 +200,15 @@
     if (ws && ws.readyState === 1) ws.send(bytes);
   }
 
+  // Keyboard input needs the canvas focused, but focusing it must never move
+  // the page: any scroll invalidates the coordinate mapping of the very event
+  // being handled. preventScroll is honoured by current browsers; where it is
+  // not, mapping before focusing (see mousedown) still keeps us correct.
+  function focusCanvas() {
+    try { canvas.focus({ preventScroll: true }); }
+    catch (err) { canvas.focus(); }
+  }
+
   function mouseXY(e) {
     var r = canvas.getBoundingClientRect();
     var sx = canvas.width / r.width;
@@ -223,8 +232,13 @@
   });
 
   canvas.addEventListener("mousedown", function (e) {
-    canvas.focus();
+    // Map BEFORE focusing. Focusing a tabindex'd canvas can scroll it into
+    // view, and that scroll lands mid-dispatch: getBoundingClientRect() would
+    // then report the moved rect while e.clientY still holds the pre-scroll
+    // value, sending coordinates off by the scroll delta. That is enough to
+    // miss a menubar entirely and click the widget below it.
     var p = mouseXY(e);
+    focusCanvas();
     var flags = e.button === 2 ? MOUSE_2_DOWN : MOUSE_1_DOWN;
     send(mouseMsg(INPUT_MOUSE_BUTTON | INPUT_MOUSE_ABSOLUTE, flags, p[0], p[1]));
     e.preventDefault();
@@ -293,7 +307,7 @@
   });
 
   canvas.setAttribute("tabindex", "0");
-  canvas.addEventListener("click", function () { canvas.focus(); });
+  canvas.addEventListener("click", function () { focusCanvas(); });
 
   connect();
 })();

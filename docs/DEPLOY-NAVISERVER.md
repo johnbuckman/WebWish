@@ -8,7 +8,7 @@ The app itself runs in a Linux container; NaviServer just pumps bytes between
 the browser's WebSocket and the container's stdin/stdout.
 
 ```
-browser ──WebSocket──► NaviServer (stream-docker.adp) ──stdio──► hardened container
+browser ──WebSocket──► NaviServer (stream.adp) ──stdio──► hardened container
 ```
 
 ## Prerequisites
@@ -58,41 +58,42 @@ gunzip -c webwish-undroidwish-arm64-tiles.tar.gz | docker load
 From this repo, put `docker/run-session.sh` somewhere NaviServer can execute it
 and note its **absolute path**:
 
+`run-session.sh` ships inside `server/`, so step 3 installs it along with
+everything else. It is just the hardened `docker run` (`--network none
+--read-only --user 65534 --cap-drop ALL --pids-limit 128 --memory 256m`,
+`--rm`).
+
+## 3. Copy the `server/` directory into your pageroot
+
 ```sh
-install -m 0755 docker/run-session.sh /usr/local/ns/bin/webwish-run-session.sh
+cp -r server /path/to/pageroot/uw
+chmod +x /path/to/pageroot/uw/run-session.sh
 ```
 
-It is just the hardened `docker run` (`--network none --read-only --user 65534
---cap-drop ALL --pids-limit 128 --memory 256m`, `--rm`).
-
-## 3. Copy three files into your pageroot
-
-Into e.g. `<pageroot>/uw/`:
+Anywhere works — `/uw/`, `/demo/apps/x/`, any depth. `stream.adp` finds its
+siblings relative to its own location, so **there are no paths to edit**.
 
 | File | Role |
 |---|---|
-| `server/stream-docker.adp` | the WebSocket ⇄ container-stdio bridge |
-| `server/democ.adp` | demo page (canvas + status bar) |
-| `server/wstiles.js` | the browser client — **required**, served next to the page |
+| `index.adp` | the page (canvas + status bar); loads as the directory index |
+| `stream.adp` | the WebSocket ⇄ container-stdio bridge |
+| `run-session.sh` | the hardened `docker run` |
+| `wstiles.js` | the browser client — **required**, served next to the page |
+| `app.tcl` | **optional** — your Tcl/Tk app; auto-runs if present |
 
-## 4. Point the bridge at the runner
+## 4. Choose the app and image
 
-Edit the one line at the top of `<pageroot>/uw/stream-docker.adp`:
-
-```tcl
-set RUNNER "/usr/local/ns/bin/webwish-run-session.sh"
-```
+Drop your script in as `<pageroot>/uw/app.tcl` and every session runs it,
+bind-mounted read-only into the container. With no `app.tcl` you get
+undroidwish's Tcl console — **do not expose that**, see
+[../SECURITY.md](../SECURITY.md).
 
 **If your image tag isn't the default** (`webwish/undroidwish:latest`) — i.e. on
-an Intel Mac, or to use AV1 — wrap the runner instead of editing it, and point
-`RUNNER` at the wrapper:
+an Intel Mac, or to use AV1 — set it in the environment NaviServer runs with, or
+edit the default at the top of `run-session.sh`:
 
 ```sh
-cat > /usr/local/ns/bin/webwish-run-session.sh <<'EOF'
-#!/bin/sh
-WEBWISH_IMAGE=webwish/undroidwish:latest-amd64 exec /path/to/run-session.sh
-EOF
-chmod +x /usr/local/ns/bin/webwish-run-session.sh
+WEBWISH_IMAGE=webwish/undroidwish:latest-amd64
 ```
 
 For AV1: `WEBWISH_IMAGE=webwish/undroidwish:av1 WEBWISH_CODEC=av1`.
@@ -100,7 +101,7 @@ For AV1: `WEBWISH_IMAGE=webwish/undroidwish:av1 WEBWISH_CODEC=av1`.
 ## 5. Open it
 
 ```
-http://your-host/uw/democ.adp
+http://your-host/uw/
 ```
 
 You should see the status line go **`live (tiles) — 1024×768`** (or `live (AV1)`),
@@ -111,10 +112,11 @@ per browser tab; it is destroyed when the tab closes.
 
 | Symptom | Cause |
 |---|---|
-| `expected websocket upgrade` in the browser | you loaded `stream-docker.adp` directly — open `democ.adp` instead |
-| Page loads, canvas stays blank | check `docker ps` for a session container; if none, NaviServer can't run `docker` (permissions) or `RUNNER` path is wrong |
+| `expected websocket upgrade` in the browser | you loaded `stream.adp` directly — open the directory URL instead |
+| Page loads, canvas stays blank | check `docker ps` for a session container; if none, NaviServer can't run `docker` (permissions) or `run-session.sh` is not executable |
 | Canvas blank, container **is** running | wrong/missing `wstiles.js` next to the page |
 | `no such image` in NaviServer's error log | image tag mismatch — set `WEBWISH_IMAGE` (step 4) |
+| Menu opens under the wrong widget | stale `wstiles.js` — it must be the current one (fixed a focus-scroll coordinate bug) |
 | Renders but keyboard does nothing | click the canvas first to focus it |
 
 Container stderr goes to `/tmp/uwchild.log`.

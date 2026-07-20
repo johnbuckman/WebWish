@@ -32,7 +32,7 @@ that renders through SDL's software framebuffer path.
 > multi-command round-trips, per-session process spawn/reap, and single-port
 > multiplexing are all verified live on arm64 macOS **and in the hardened Linux
 > container** (built against AndroWish's SDL2 fork — see [docker/](docker/)).
-> Tk menus are the known gap. It is a **patch into an SDL2
+> It is a **patch into an SDL2
 > build tree**, not yet a drop-in library. See [Limitations](#limitations).
 
 > ## ⚠️ Security
@@ -90,9 +90,9 @@ docker run --rm -i --network none --read-only --tmpfs /tmp \
   webwish/undroidwish:latest-amd64
 ```
 
-Put a WebSocket bridge in front to see it in a browser — the repo ships one
-(`server/stream-docker.adp` + `server/democ.adp`, driven by
-[`docker/run-session.sh`](docker/run-session.sh)). See [docker/README.md](docker/README.md).
+Put a WebSocket bridge in front to see it in a browser — the repo ships one in
+[`server/`](server/) (`index.adp` + `stream.adp`, driven by `run-session.sh`).
+See [docker/README.md](docker/README.md).
 
 **Already running NaviServer?** [docs/DEPLOY-NAVISERVER.md](docs/DEPLOY-NAVISERVER.md)
 walks through serving WebWish from an existing instance (macOS or Linux) with no
@@ -114,17 +114,26 @@ SDL_VIDEODRIVER=wstiles SDL_VIDEO_WSTILES_PORT=8090 \
 
 ### Mode B — many users on one port, behind naviserver
 
-The `server/` directory is a [NaviServer](https://naviserver.sourceforge.io/)
-reference bridge. Each browser tab gets its **own** private app process, spawned
-on connect and killed on disconnect, all multiplexed through **one** public
-port. Copy `server/*` into your naviserver pageroot (e.g. `/uw/`), set the
-binary path at the top of `stream.adp`/`spawn.adp`, and open
-`http://host/uw/demob.adp`.
+The `server/` directory is a self-contained
+[NaviServer](https://naviserver.sourceforge.io/) reference bridge. Each browser
+tab gets its **own** private session, spawned on connect and killed on
+disconnect, all multiplexed through **one** public port.
 
-- `stream.adp` + `demob.adp` — single public port; WebSocket ⇄ stdio bridge,
-  event-driven and off the connection-thread pool (scales to many clients).
-- `spawn.adp` + `demo.adp` — simpler alternative: each tab gets its own TCP
-  port via the driver's built-in server.
+Copy the whole directory anywhere under your pageroot — `/uw/`, `/demo/apps/x/`,
+wherever — and open that URL. Nothing to edit: `stream.adp` locates its
+siblings relative to itself, and `index.adp` is a directory index so the bare
+directory URL loads it.
+
+- `index.adp` — the page; picks its WebSocket URL from its own location.
+- `stream.adp` — the bridge: WebSocket ⇄ stdio, event-driven and off the
+  connection-thread pool, so it scales to many clients.
+- `run-session.sh` — one hardened container per session (see Mode C).
+- `app.tcl` — **optional**: drop your Tcl/Tk script in beside the others and it
+  becomes the app each session runs. With no `app.tcl` you get undroidwish's
+  Tcl console, which you should not expose (see [SECURITY.md](SECURITY.md)).
+  `app.tcl.example` is a starting point.
+- `alternatives/` — a bare-process bridge (no container) and the
+  port-per-session variant that uses the driver's own server.
 
 ---
 
@@ -145,8 +154,8 @@ binary path at the top of `stream.adp`/`spawn.adp`, and open
 
 The `docker/` directory runs each session as a locked-down, ephemeral container
 (`--network none`, read-only rootfs, non-root, `--cap-drop ALL`, pid/mem/cpu
-caps), wired over stdio so no per-session port is opened. `server/stream-docker.adp`
-is the bridge variant that spawns a container instead of a bare process. See
+caps), wired over stdio so no per-session port is opened. This is what
+`server/stream.adp` does by default, via `server/run-session.sh`. See
 [docker/README.md](docker/README.md) and [SECURITY.md](SECURITY.md).
 
 ---
@@ -157,8 +166,9 @@ is the bridge variant that spawns a container instead of a bare process. See
 driver/    SDL_wstiles.c — the SDL2 video driver (the reusable core)
            data/{index.html,wstiles.js} — client assets embedded into the binary
            genfiles.sh — regenerates SDL_wstiles_files.h from data/
-server/    NaviServer reference bridge (.adp) + a copy of the browser client
-           stream-docker.adp — bridge variant: one hardened container per session
+server/    self-contained NaviServer bridge — drop the directory anywhere in
+           your docroot; index.adp + stream.adp + run-session.sh + wstiles.js,
+           and an optional app.tcl that becomes the app each session runs
 docker/    Linux build recipe + hardened per-session container runtime
 patches/   the edits needed to wire the driver into an SDL2 tree
 docs/      BUILDING.md, WIRE-PROTOCOL.md, DEPLOY-NAVISERVER.md
@@ -183,23 +193,28 @@ SECURITY.md  threat model + defense-in-depth — READ BEFORE EXPOSING
 
 This is an honest alpha. Known defects and gaps:
 
-- **Tk menus do not post.** Clicking a menubutton (a `-menu` menubar entry, or
-  the undroidwish console's File/Edit) delivers the click to the app — a probe
-  app bound to `<Button-1>` reports it — but no menu ever appears. sdl2tk posts
-  menus as separate SDL windows carrying `SDL_WINDOW_POPUP_MENU`, and the
-  driver, like the `jsmpeg` driver it derives from, gives those windows a
-  surface but never composites or streams them. Everything else in a menubar-
-  free app works. Reproduced identically on macOS-native and in the Linux
-  container, so it is a driver gap, not a platform regression.
+- **The app is fixed at 1024×768.** `WSTILES_VideoInit` hardcodes the mode, the
+  wire protocol has no resize message, and the client never reports the browser
+  viewport — so every session is the same size whatever it is viewed on.
+- **No touch input.** The client binds mouse events only, so phones and tablets
+  cannot drive a session.
+- **Clipboard is one-way.** Server→browser clipboard frames arrive and the
+  client drops them.
+- `WarpMouse` is unimplemented, so apps that recentre the pointer misbehave.
 
 Not yet done:
 
-- Display, mouse (motion, click, drag) and keyboard are verified working on
-  **arm64 macOS** and in the **Linux container** (x86-64 and arm64). Windows is
-  untried.
+- Display, mouse (motion, click, drag), keyboard and menus are verified working
+  on **arm64 macOS** and in the **Linux container** (x86-64 and arm64). Windows
+  is untried.
 - It's a **patch into an SDL2 build**, not a standalone shared library.
-- `server/spawn.adp` is **unauthenticated** — a DoS vector; add rate-limiting
-  and a session cap before any public deployment.
+- **Neither bridge authenticates.** `stream.adp` — the recommended one — spawns
+  a container for anyone who completes the WebSocket handshake, and
+  `spawn.adp` is the same. Per-session container hardening bounds what one
+  session can do; it does nothing about someone opening a thousand of them. Add
+  auth, a session cap and rate-limiting before any public deployment. (The
+  driver's own Mode A server does support HTTP Basic via
+  `SDL_VIDEO_WSTILES_AUTH`.)
 - Per-session ports (Mode B's `spawn.adp` variant) must be browser-reachable;
   the `stream.adp` single-port bridge avoids this.
 - No shared multi-viewer stream yet (each viewer drives its own process).

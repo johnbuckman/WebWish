@@ -5,7 +5,7 @@ container per browser tab**, wired over stdio so no per-session port is opened.
 It is the concrete implementation of Layer B in [../SECURITY.md](../SECURITY.md).
 
 ```
-browser ──WSS──► reverse proxy (TLS, auth) ──► naviserver (server/stream-docker.adp)
+browser ──WSS──► reverse proxy (TLS, auth) ──► naviserver (server/stream.adp)
                                                    │  open "|run-session.sh" r+
                                                    ▼
                               docker run --rm -i --network none --read-only
@@ -19,8 +19,8 @@ browser ──WSS──► reverse proxy (TLS, auth) ──► naviserver (serve
 |---|---|
 | `build-linux-binary.sh` | patches wstiles into AndroWish's SDL2 fork and runs the official Linux build → `dist/undroidwish-wstiles` |
 | `Dockerfile` | minimal non-root runtime image wrapping that binary in stdio mode |
-| `run-session.sh` | the hardened `docker run` invocation, one per session |
-| `../server/stream-docker.adp` | the naviserver bridge variant that spawns a container instead of a bare process |
+| `../server/run-session.sh` | the hardened `docker run` invocation, one per session (ships in `server/` so the bridge bundle is self-contained) |
+| `../server/stream.adp` | the naviserver bridge; spawns a container per session via `../server/run-session.sh` |
 
 ## Status
 
@@ -35,7 +35,7 @@ browser ──WSS──► reverse proxy (TLS, auth) ──► naviserver (serve
   runs undroidwish over stdio under `--network none --read-only --user 65534
   --cap-drop ALL --pids-limit --memory`, emitting the correct `wtil` handshake.
   All isolation flags verified applied via `docker inspect`.
-- ✅ **Live browser session verified** — `server/democ.adp` → `stream-docker.adp`
+- ✅ **Live browser session verified** — `server/index.adp` → `stream.adp`
   → `run-session.sh` spawns one hardened container per tab; undroidwish renders
   in the browser, input round-trips *inside* the container (`pwd` → `/`), and the
   container is reaped on disconnect.
@@ -61,7 +61,7 @@ Ready-to-run images are attached to the
 
 ```sh
 gunzip -c webwish-undroidwish-amd64-tiles.tar.gz | docker load
-WEBWISH_IMAGE=webwish/undroidwish:latest-amd64 ./run-session.sh </dev/null | head -c 13 | od -An -tx1
+WEBWISH_IMAGE=webwish/undroidwish:latest-amd64 ../server/run-session.sh </dev/null | head -c 13 | od -An -tx1
 # -> 00 00 00 09 77 74 69 6c 04 00 03 00 00   ("wtil" handshake, 1024x768, tiles)
 ```
 
@@ -99,7 +99,7 @@ docker run --rm -e WEBWISH_AV1=1 -v "$AW":/aw:ro \
   -v "$PWD/..":/webwish:ro -v "$PWD/dist":/out debian:bookworm \
   bash /webwish/docker/build-linux-binary.sh
 docker build --build-arg WEBWISH_AV1=1 -t webwish/undroidwish:av1 .
-# then run sessions with:  WEBWISH_CODEC=av1 WEBWISH_IMAGE=webwish/undroidwish:av1 ./run-session.sh
+# then run sessions with:  WEBWISH_CODEC=av1 WEBWISH_IMAGE=webwish/undroidwish:av1 ../server/run-session.sh
 
 # x86_64 (emulated on Apple Silicon; native on an x86 host)
 docker run --rm --platform linux/amd64 -v "$AW":/aw:ro \
@@ -111,10 +111,10 @@ docker run --rm --platform linux/amd64 -v "$AW":/aw:ro \
 
 ```sh
 # smoke-test the container over stdio (it will emit a binary handshake frame)
-./run-session.sh </dev/null | head -c 13 | od -An -tx1
+../server/run-session.sh </dev/null | head -c 13 | od -An -tx1
 ```
 
-In production, `server/stream-docker.adp` calls `run-session.sh` per WebSocket;
+In production, `server/stream.adp` calls `run-session.sh` per WebSocket;
 the container dies (`--rm`) the instant the socket closes.
 
 ## Hardening knobs
