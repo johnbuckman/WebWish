@@ -184,8 +184,10 @@ static SDL_INLINE void puti32(unsigned char *p, int v)  /* big endian */
 { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v; }
 
 /* Clamp a requested framebuffer size into what we are willing to allocate.
-   Widths are rounded down to a multiple of 16: the AV1 encoder wants aligned
-   dimensions, and it costs at most 15 columns. */
+   Width is rounded down to a multiple of 16 and height to a multiple of 2:
+   the AV1 encoder wants aligned dimensions, and it costs at most 15 columns
+   and one row. Both bounds are multiples of 16, so rounding can never push a
+   size back under the minimum. */
 static void WSTILES_ClampSize(int *w, int *h)
 {
     if (*w < WSTILES_MIN_DIM) *w = WSTILES_MIN_DIM;
@@ -193,6 +195,7 @@ static void WSTILES_ClampSize(int *w, int *h)
     if (*w > WSTILES_MAX_DIM) *w = WSTILES_MAX_DIM;
     if (*h > WSTILES_MAX_DIM) *h = WSTILES_MAX_DIM;
     *w &= ~15;
+    *h &= ~1;
 }
 
 /* .keyCode -> SDL scancode (subset; enough for common keys) */
@@ -461,8 +464,11 @@ WSTILES_VideoInit(_THIS)
     env = SDL_getenv("SDL_VIDEO_WSTILES_SIZE");
     if (env != NULL) {
         int ew = 0, eh = 0;
-        if (SDL_sscanf(env, "%dx%d", &ew, &eh) == 2)
-            WSTILES_ClampSize(&ew, &eh), mode.w = ew, mode.h = eh;
+        if (SDL_sscanf(env, "%dx%d", &ew, &eh) == 2) {
+            WSTILES_ClampSize(&ew, &eh);
+            mode.w = ew;
+            mode.h = eh;
+        }
     }
     display.current_mode = mode;
     display.driverdata = _this->driverdata;
@@ -978,7 +984,9 @@ WSTILES_PumpEvents(_THIS)
             }
             /* Invalidates the surface and posts SIZE_CHANGED; SDL calls back
                into CreateWindowFramebuffer, which reallocates and re-announces
-               the size to the client. */
+               the size to the client. Note the announcement is what completes
+               the resize, so it only lands once the app draws again -- an app
+               that has stopped drawing entirely stays at its old size. */
             SDL_SetWindowSize(data->window, nw, nh);
         }
     }
