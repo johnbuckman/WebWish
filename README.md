@@ -72,6 +72,9 @@ that renders through SDL's software framebuffer path.
      model).
 
 The full byte layout is in [docs/WIRE-PROTOCOL.md](docs/WIRE-PROTOCOL.md).
+**Picking this up cold?** [docs/AGENT-BOOTSTRAP.md](docs/AGENT-BOOTSTRAP.md) is
+the orientation doc: current state, build recipes, the bugs already solved and
+why, and the traps that will otherwise cost you a day.
 
 ---
 
@@ -100,7 +103,7 @@ See [docker/README.md](docker/README.md).
 
 **Already running NaviServer?** [docs/DEPLOY-NAVISERVER.md](docs/DEPLOY-NAVISERVER.md)
 walks through serving WebWish from an existing instance (macOS or Linux) with no
-build at all: load an image, copy three files, edit one path.
+build at all: load an image, copy one directory, edit nothing.
 
 ### From source
 
@@ -176,7 +179,9 @@ server/    self-contained NaviServer bridge — drop the directory anywhere in
            and an optional app.tcl that becomes the app each session runs
 docker/    Linux build recipe + hardened per-session container runtime
 patches/   the edits needed to wire the driver into an SDL2 tree
-docs/      BUILDING.md, WIRE-PROTOCOL.md, DEPLOY-NAVISERVER.md
+docs/      AGENT-BOOTSTRAP.md — read first if you are picking this up cold
+           BUILDING.md, WIRE-PROTOCOL.md, DEPLOY-NAVISERVER.md
+           probe-app.tcl — diagnostic harness for input/menu/repaint bugs
 SECURITY.md  threat model + defense-in-depth — READ BEFORE EXPOSING
 ```
 

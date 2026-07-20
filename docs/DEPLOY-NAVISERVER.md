@@ -2,7 +2,7 @@
 
 If you already run NaviServer (macOS or Linux), you can serve WebWish **without
 building anything** — use a prebuilt container image and point a small bridge
-page at it. Total work: load an image, copy three files, edit one path.
+page at it. Total work: load an image, copy one directory, edit nothing.
 
 The app itself runs in a Linux container; NaviServer just pumps bytes between
 the browser's WebSocket and the container's stdin/stdout.
