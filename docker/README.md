@@ -71,10 +71,18 @@ them to anyone untrusted.
 
 ## Build
 
+**You need an AndroWish checkout.** The driver is a patch into AndroWish's SDL2
+fork, so the builder mounts an AndroWish source tree at `/aw`. Get one from
+<https://www.androwish.org/> (Fossil) — see
+[../docs/BUILDING.md](../docs/BUILDING.md#getting-the-source). Everything else
+(compilers, libwebsockets, zlib, freetype…) is installed inside the container.
+
 ```sh
+AW=/path/to/your/androwish        # tree containing jni/ and undroid/
+
 # 1. produce the Linux binary (runs a builder container; long)
 docker run --rm \
-  -v ~/iwish/src/androwish:/aw:ro \
+  -v "$AW":/aw:ro \
   -v "$PWD/..":/webwish:ro \
   -v "$PWD/dist":/out \
   debian:bookworm bash /webwish/docker/build-linux-binary.sh
@@ -87,14 +95,14 @@ docker build -t webwish/undroidwish:latest .
 
 ```sh
 # AV1 codec (adds libaom): build the binary, then an AV1 runtime image
-docker run --rm -e WEBWISH_AV1=1 -v ~/iwish/src/androwish:/aw:ro \
+docker run --rm -e WEBWISH_AV1=1 -v "$AW":/aw:ro \
   -v "$PWD/..":/webwish:ro -v "$PWD/dist":/out debian:bookworm \
   bash /webwish/docker/build-linux-binary.sh
 docker build --build-arg WEBWISH_AV1=1 -t webwish/undroidwish:av1 .
 # then run sessions with:  WEBWISH_CODEC=av1 WEBWISH_IMAGE=webwish/undroidwish:av1 ./run-session.sh
 
 # x86_64 (emulated on Apple Silicon; native on an x86 host)
-docker run --rm --platform linux/amd64 -v ~/iwish/src/androwish:/aw:ro \
+docker run --rm --platform linux/amd64 -v "$AW":/aw:ro \
   -v "$PWD/..":/webwish:ro -v "$PWD/dist":/out debian:bookworm \
   bash /webwish/docker/build-linux-binary.sh
 ```
@@ -103,7 +111,7 @@ docker run --rm --platform linux/amd64 -v ~/iwish/src/androwish:/aw:ro \
 
 ```sh
 # smoke-test the container over stdio (it will emit a binary handshake frame)
-./run-session.sh </dev/null | head -c 32 | xxd
+./run-session.sh </dev/null | head -c 13 | od -An -tx1
 ```
 
 In production, `server/stream-docker.adp` calls `run-session.sh` per WebSocket;

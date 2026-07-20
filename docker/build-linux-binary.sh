@@ -140,15 +140,31 @@ echo "--- purge stale (macOS) object/archive artifacts from the source ---"
 n=$(find /work/build -type f \( -name '*.o' -o -name '*.a' -o -name '*.lo' -o -name '*.la' -o -name '*.dylib' \) -print -delete | wc -l)
 echo "purged $n stale artifacts"
 
-# The tree's committed autoconf state bakes in a macOS freetype dev path
-# (/Users/john/iwish/dist/ft-dev) that the Tk-SDL AGG font renderer compiles
-# against. Point it at the container's system freetype (libfreetype6-dev) so
-# ft2build.h and libfreetype resolve.
-echo "--- alias the baked-in macOS freetype path to system freetype ---"
-mkdir -p /Users/john/iwish/dist/ft-dev
-ln -sfn /usr/include "/Users/john/iwish/dist/ft-dev/include"
-ln -sfn "/usr/lib/$(gcc -dumpmachine)" "/Users/john/iwish/dist/ft-dev/lib"
-ls -l /Users/john/iwish/dist/ft-dev/include/freetype2/ft2build.h 2>&1 | head -1
+# An AndroWish working copy that has been built elsewhere can have an absolute
+# freetype dev path baked into its committed autoconf state (config.status,
+# generated Makefiles) — e.g. a macOS ".../dist/ft-dev/include/freetype2". The
+# Tk-SDL AGG font renderer then compiles against a path that doesn't exist here
+# and fails on <ft2build.h>. Detect any such baked-in path and alias it to the
+# container's system freetype (libfreetype6-dev). A pristine checkout usually
+# has none, in which case this is a no-op.
+echo "--- alias any baked-in freetype paths to system freetype ---"
+LIBDIR="/usr/lib/$(gcc -dumpmachine)"
+found=0
+for p in $(grep -rhoE '/[A-Za-z0-9._/+-]+/include/freetype2' "$AW/jni/sdl2tk" 2>/dev/null | sort -u); do
+  [ -d "$p" ] && continue                 # already resolvable — nothing to do
+  case "$p" in
+    # NEVER touch standard system prefixes: symlinking e.g. /usr/local/include
+    # would clobber the container's own tree. Only alias foreign absolute paths
+    # left behind by a build on someone else's machine.
+    /usr/*|/opt/*|/lib/*|/etc/*|/bin/*|/sbin/*) continue ;;
+  esac
+  base="${p%/include/freetype2}"
+  mkdir -p "$base"
+  ln -sfn /usr/include "$base/include" 2>/dev/null
+  ln -sfn "$LIBDIR"    "$base/lib"     2>/dev/null
+  if [ -r "$p/ft2build.h" ]; then echo "  aliased $base -> system freetype"; found=$((found+1)); fi
+done
+[ "$found" = 0 ] && echo "  (none needed — freetype resolves normally)"
 
 echo "--- build ---"
 if "$BS" build; then

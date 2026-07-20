@@ -8,13 +8,53 @@ build.
 The recipe below is the one **verified on arm64 macOS** with Homebrew. Other
 platforms should work (the code is not macOS-specific) but are untested.
 
+## ⚠️ You need AndroWish's SDL2 **fork**, not stock SDL2
+
+This is the single biggest gotcha. `SDL_wstiles.c` is written against the SDL2
+that ships **inside AndroWish** (`jni/SDL2`), which is **SDL 2.0.6**. It will
+**not compile against stock/modern SDL2** — the internal API has drifted:
+
+| | AndroWish fork (2.0.6) | Stock SDL2 (e.g. 2.30) |
+|---|---|---|
+| `SDL_AddVideoDisplay` | 1 arg | 2 args (`+ SDL_bool send_event`) |
+| `SDL_SendKeyboardKey` | 4 args (`+ rate, delay`) | 2 args |
+| `VideoBootStrap` | has an `available` member; `create(int)` | no `available`; `create(void)` + `ShowMessageBox` |
+
+Building against stock SDL2 fails with `too few/many arguments` and
+incompatible-pointer errors on the bootstrap struct. Porting the driver to
+modern SDL2 is possible but is *not* done — treat the fork as a requirement.
+
+## Getting the source
+
+The driver is a patch into an AndroWish checkout. AndroWish is developed in
+**Fossil** and published at <https://www.androwish.org/> — get a checkout from
+there (the site's *Timeline / Download* pages give the current clone URL and
+source tarballs), e.g.:
+
+```sh
+fossil clone https://www.androwish.org/index.html androwish.fossil
+mkdir androwish && cd androwish && fossil open ../androwish.fossil
+```
+
+You end up with a tree containing `jni/` (including `jni/SDL2`, `jni/tcl`,
+`jni/sdl2tk`) and `undroid/` (including `undroid/build-undroidwish-linux64.sh`).
+That directory is what `docker/build-linux-binary.sh` expects mounted at `/aw`.
+
+> **Note on working copies:** a tree that has already been built on another
+> machine can carry committed object files and absolute paths from that machine.
+> `docker/build-linux-binary.sh` defends against both (it purges stale
+> `*.o/*.a/*.dylib` and aliases foreign baked-in freetype paths), so it works
+> with either a pristine clone or a used working copy.
+
 ## Prerequisites
 
-- An SDL2 source tree you can rebuild. This was developed against the SDL2
-  bundled with [AndroWish/undroidwish](https://www.androwish.org/), whose build
-  also provides **libwebsockets** in a sibling `libwebsockets/` directory.
-- Homebrew packages: `brew install libaom zlib` (libwebsockets comes from the
-  AndroWish tree; or `brew install libwebsockets` and adjust include paths).
+- An AndroWish checkout (above) — its `jni/SDL2` is the SDL2 you build against.
+- For the **Linux/Docker** path: just Docker. `docker/build-linux-binary.sh`
+  installs every build dependency inside the container. **Start here** — it is
+  the only fully-automated, verified path (see [../docker/README.md](../docker/README.md)).
+- For a **manual/macOS** build: a C toolchain plus `libwebsockets`, `zlib`, and
+  (optionally, for AV1) `libaom`. On macOS: `brew install libaom zlib libwebsockets`
+  — or use the `libwebsockets` that AndroWish's own build produces.
 
 ## 1. Drop the driver into the SDL2 tree
 
